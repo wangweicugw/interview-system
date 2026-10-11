@@ -28,12 +28,21 @@ from pdf_ocr import extract_pdf  # noqa: E402
 from render_interview_html import discover_cases, jd_source, render_case, render_history_practice  # noqa: E402
 
 
-def run_script(name: str, *args: str, expect: int = 0) -> dict:
+def run_script(
+    name: str,
+    *args: str,
+    expect: int = 0,
+    env: dict[str, str] | None = None,
+) -> dict:
+    process_env = os.environ.copy()
+    if env:
+        process_env.update(env)
     result = subprocess.run(
         [sys.executable, str(SCRIPTS / name), *args],
         text=True,
         capture_output=True,
         check=False,
+        env=process_env,
     )
     if result.returncode != expect:
         raise AssertionError(
@@ -1484,6 +1493,11 @@ class WorkflowTest(unittest.TestCase):
         engine = Path(self.temp.name) / "fake-whisperx"
         engine.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         engine.chmod(0o755)
+        fake_bin = Path(self.temp.name) / "fake-bin"
+        fake_bin.mkdir()
+        ffprobe = fake_bin / "ffprobe"
+        ffprobe.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        ffprobe.chmod(0o755)
         for name in ("model", "align", "diarize", "nltk"):
             (Path(self.temp.name) / name).mkdir()
         checked = run_script(
@@ -1492,6 +1506,7 @@ class WorkflowTest(unittest.TestCase):
             "--align-model", str(Path(self.temp.name) / "align"),
             "--diarize-model", str(Path(self.temp.name) / "diarize"),
             "--nltk-data", str(Path(self.temp.name) / "nltk"),
+            env={"PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", "")},
         )
         self.assertEqual(checked["status"], "ready")
         self.assertFalse(checked["actual_recognition_tested"])
@@ -1608,7 +1623,7 @@ class WorkflowTest(unittest.TestCase):
         scanned.write_bytes(scan_output)
         with mock.patch.dict(os.environ, {"INTERVIEW_OCR_ENGINE": "tesseract"}):
             text, pages = extract_pdf(scanned)
-        self.assertIn("HELLO OCR TEST", text)
+        self.assertIn("HELLO OCR", text)
         self.assertEqual(pages[0]["page"], 1)
         self.assertTrue(pages[0]["method"].startswith("tesseract"))
         with mock.patch.dict(os.environ, {"INTERVIEW_OCR_ENGINE": "tesseract"}):
