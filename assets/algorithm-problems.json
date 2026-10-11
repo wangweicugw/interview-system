@@ -1,0 +1,169 @@
+[
+  {
+    "id": "two-sum-first",
+    "title": "最靠前的目标数对",
+    "topic": "哈希表",
+    "difficulty": "easy",
+    "statement": "给定整数数组 nums 和 target，返回和为 target 的下标对 [i,j]，其中 i<j。若有多组，取字典序最小的一组；没有则返回 []。",
+    "target_complexity": "时间 O(n)，空间 O(n)",
+    "hints": ["遍历右端点时，左侧哪些信息值得保存？", "保存每个数最早出现的下标，并比较候选下标对。"],
+    "review_points": ["重复数字", "多组答案的字典序", "无答案"],
+    "tests": [
+      {"input": {"nums": [2, 7, 11, 15], "target": 9}, "expected": [0, 1], "public": true},
+      {"input": {"nums": [3, 2, 4, 3], "target": 6}, "expected": [0, 3], "public": false},
+      {"input": {"nums": [1, 2], "target": 10}, "expected": [], "public": false}
+    ]
+  },
+  {
+    "id": "max-subarray",
+    "title": "最大连续子数组和",
+    "topic": "动态规划",
+    "difficulty": "easy",
+    "statement": "给定非空整数数组 nums，返回一个非空连续子数组能取得的最大和。",
+    "target_complexity": "时间 O(n)，空间 O(1)",
+    "hints": ["考虑以当前位置结尾的最优值。", "当前位置可单独开始，也可接在前一段之后。"],
+    "review_points": ["全负数组", "单元素", "状态转移"],
+    "tests": [
+      {"input": {"nums": [-2, 1, -3, 4, -1, 2, 1, -5, 4]}, "expected": 6, "public": true},
+      {"input": {"nums": [-4, -2, -7]}, "expected": -2, "public": false},
+      {"input": {"nums": [5]}, "expected": 5, "public": false}
+    ]
+  },
+  {
+    "id": "unique-window",
+    "title": "无重复字符的最长区间",
+    "topic": "滑动窗口",
+    "difficulty": "medium",
+    "statement": "给定字符串 text，返回其中不含重复字符的最长连续子串长度。",
+    "target_complexity": "时间 O(n)，空间 O(字符集大小)",
+    "hints": ["维护一个始终无重复的窗口。", "重复字符出现时，左边界只能向右移动。"],
+    "review_points": ["空字符串", "左边界不能回退", "重复位置更新"],
+    "tests": [
+      {"input": {"text": "abcabcbb"}, "expected": 3, "public": true},
+      {"input": {"text": "bbbbb"}, "expected": 1, "public": false},
+      {"input": {"text": ""}, "expected": 0, "public": false},
+      {"input": {"text": "pwwkew"}, "expected": 3, "public": false}
+    ]
+  },
+  {
+    "id": "first-position",
+    "title": "有序数组中目标值的首个位置",
+    "topic": "二分查找",
+    "difficulty": "easy",
+    "statement": "给定非递减数组 nums 和 target，返回 target 首次出现的下标；不存在返回 -1。",
+    "target_complexity": "时间 O(log n)，空间 O(1)",
+    "hints": ["查找第一个大于等于 target 的位置。", "循环结束后检查候选位置是否真的等于 target。"],
+    "review_points": ["重复值", "空数组", "边界循环不变量"],
+    "tests": [
+      {"input": {"nums": [1, 2, 2, 2, 3], "target": 2}, "expected": 1, "public": true},
+      {"input": {"nums": [], "target": 1}, "expected": -1, "public": false},
+      {"input": {"nums": [1, 3, 5], "target": 4}, "expected": -1, "public": false}
+    ]
+  },
+  {
+    "id": "balanced-brackets",
+    "title": "括号序列校验",
+    "topic": "栈",
+    "difficulty": "easy",
+    "statement": "字符串 text 仅包含 ()[]{} 六种字符。判断括号顺序与类型是否完全匹配。",
+    "target_complexity": "时间 O(n)，空间 O(n)",
+    "hints": ["最近打开的括号必须最先关闭。", "遇到右括号时，与栈顶的左括号匹配。"],
+    "review_points": ["类型错配", "提前出现右括号", "结束时栈非空"],
+    "tests": [
+      {"input": {"text": "()[]{}"}, "expected": true, "public": true},
+      {"input": {"text": "(]"}, "expected": false, "public": false},
+      {"input": {"text": "([{}])"}, "expected": true, "public": false},
+      {"input": {"text": "(("}, "expected": false, "public": false}
+    ]
+  },
+  {
+    "id": "merge-touching-intervals",
+    "title": "合并相交或接触的区间",
+    "topic": "排序与区间",
+    "difficulty": "medium",
+    "statement": "输入闭区间数组 intervals。合并相交或端点接触的区间，按起点升序返回。",
+    "target_complexity": "时间 O(n log n)，空间 O(n)",
+    "hints": ["先按起点排序。", "新区间起点不大于当前末尾时延长当前区间。"],
+    "review_points": ["端点接触", "输入无序", "空输入"],
+    "tests": [
+      {"input": {"intervals": [[1, 3], [2, 6], [8, 10]]}, "expected": [[1, 6], [8, 10]], "public": true},
+      {"input": {"intervals": [[2, 3], [1, 2]]}, "expected": [[1, 3]], "public": false},
+      {"input": {"intervals": []}, "expected": [], "public": false}
+    ]
+  },
+  {
+    "id": "unweighted-route",
+    "title": "无权图最短路径长度",
+    "topic": "广度优先搜索",
+    "difficulty": "medium",
+    "statement": "给定节点 0..n-1、无向边 edges、起点 start 和终点 end，返回最少边数；不可达返回 -1。",
+    "target_complexity": "时间 O(n+边数)，空间 O(n+边数)",
+    "hints": ["按距离逐层搜索。", "入队时标记访问，避免重复入队。"],
+    "review_points": ["起终点相同", "断开分量", "重复边"],
+    "tests": [
+      {"input": {"n": 4, "edges": [[0, 1], [1, 2], [0, 3], [3, 2]], "start": 0, "end": 2}, "expected": 2, "public": true},
+      {"input": {"n": 3, "edges": [[0, 1]], "start": 0, "end": 2}, "expected": -1, "public": false},
+      {"input": {"n": 1, "edges": [], "start": 0, "end": 0}, "expected": 0, "public": false}
+    ]
+  },
+  {
+    "id": "fewest-coins",
+    "title": "凑金额的最少硬币数",
+    "topic": "动态规划",
+    "difficulty": "medium",
+    "statement": "给定正整数面值 coins，可无限次使用；返回恰好凑成 amount 的最少硬币数，不可达返回 -1。",
+    "target_complexity": "时间 O(amount × 面值数)，空间 O(amount)",
+    "hints": ["把每个较小金额的最优解作为候选。", "不可达状态要与 0 枚硬币区分。"],
+    "review_points": ["不可达", "金额为零", "状态初始化"],
+    "tests": [
+      {"input": {"coins": [1, 2, 5], "amount": 11}, "expected": 3, "public": true},
+      {"input": {"coins": [2], "amount": 3}, "expected": -1, "public": false},
+      {"input": {"coins": [1], "amount": 0}, "expected": 0, "public": false}
+    ]
+  },
+  {
+    "id": "count-target-subarrays",
+    "title": "和为目标值的连续区间个数",
+    "topic": "前缀和",
+    "difficulty": "medium",
+    "statement": "给定可含负数的整数数组 nums 和整数 target，返回和恰好等于 target 的非空连续子数组个数。",
+    "target_complexity": "时间 O(n)，空间 O(n)",
+    "hints": ["当前前缀和减去多少，才能得到目标区间？", "记录此前每种前缀和出现的次数，初始前缀和 0 出现一次。"],
+    "review_points": ["负数使滑动窗口失效", "从下标 0 开始的区间", "重复前缀和"],
+    "tests": [
+      {"input": {"nums": [1, 1, 1], "target": 2}, "expected": 2, "public": true},
+      {"input": {"nums": [1, -1, 0], "target": 0}, "expected": 3, "public": false},
+      {"input": {"nums": [], "target": 0}, "expected": 0, "public": false}
+    ]
+  },
+  {
+    "id": "course-order",
+    "title": "先修依赖的最小编号学习顺序",
+    "topic": "拓扑排序",
+    "difficulty": "medium",
+    "statement": "课程编号为 0..n-1，prerequisites 中每对 [course, before] 表示 before 必须先于 course。返回字典序最小的合法课程顺序；存在环时返回 []。保证依赖对不重复。",
+    "target_complexity": "时间 O((n+依赖数) log n)，空间 O(n+依赖数)",
+    "hints": ["入度为 0 的课程才可开始。", "始终从当前可选课程中取最小编号；处理一门课程后更新后继入度。"],
+    "review_points": ["同时可选课程的字典序", "有环", "孤立课程"],
+    "tests": [
+      {"input": {"n": 4, "prerequisites": [[1, 0], [2, 0], [3, 1], [3, 2]]}, "expected": [0, 1, 2, 3], "public": true},
+      {"input": {"n": 3, "prerequisites": [[0, 1], [1, 0]]}, "expected": [], "public": false},
+      {"input": {"n": 3, "prerequisites": []}, "expected": [0, 1, 2], "public": false}
+    ]
+  },
+  {
+    "id": "component-queries",
+    "title": "动态连通性查询",
+    "topic": "并查集",
+    "difficulty": "medium",
+    "statement": "给定节点 0..n-1 和 operations。每项为 [\"union\",a,b] 或 [\"connected\",a,b]；依次处理，返回所有 connected 查询的布尔值数组。",
+    "target_complexity": "路径压缩与按秩合并，总时间近似 O(操作数 × α(n))，空间 O(n)",
+    "hints": ["每个连通分量用一个代表节点表示。", "查找代表时压缩路径，合并时按规模或秩连接。"],
+    "review_points": ["未连接节点", "重复合并", "自连接"],
+    "tests": [
+      {"input": {"n": 4, "operations": [["union", 0, 1], ["connected", 0, 2], ["union", 1, 2], ["connected", 0, 2]]}, "expected": [false, true], "public": true},
+      {"input": {"n": 2, "operations": [["connected", 1, 1], ["union", 0, 1], ["union", 0, 1], ["connected", 0, 1]]}, "expected": [true, true], "public": false},
+      {"input": {"n": 3, "operations": []}, "expected": [], "public": false}
+    ]
+  }
+]

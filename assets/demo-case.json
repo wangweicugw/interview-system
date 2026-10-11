@@ -1,0 +1,101 @@
+{
+  "transcript": "[00:00][面试官] 请介绍一下你的缓存项目。\n[00:08][候选人] 我负责缓存一致性方案，曾考虑先删除缓存再更新数据库。\n[00:22][面试官] 为什么选择这个顺序？\n[00:27][候选人] 我当时认为它能完全避免读到旧数据。\n[00:41][面试官] 如果数据库更新失败呢？\n[00:46][候选人] 这个失败场景我没有完整考虑。\n[01:02][候选人] 团队如何衡量数据库稳定性？\n[01:10][面试官] 我们会看故障恢复时间和变更失败率。\n",
+  "jd": "示例岗位要求：熟悉缓存一致性，能分析并发和失败场景。\n",
+  "resume": "示例简历：参与过缓存项目；本文件完全虚构。\n",
+  "review": "# 虚构面试演示\n\n## 已确认事实\n候选人在模拟对话中未覆盖数据库更新失败场景。\n\n## AI 判断\n缓存一致性回答存在需要继续核验的部分。\n\n## 改进建议\n补充并发窗口与失败恢复的分析。\n",
+  "analysis": {
+    "qa-tree.json": {
+      "schema_version": 1,
+      "questions": [
+        {
+          "question_id": "q-001",
+          "parent_id": null,
+          "kind": "main",
+          "category": "project",
+          "question": "介绍缓存项目",
+          "question_evidence": ["s-0001"],
+          "answer_evidence": ["s-0002"],
+          "relation_confidence": 1.0
+        },
+        {
+          "question_id": "q-002",
+          "parent_id": "q-001",
+          "kind": "follow_up",
+          "category": "technical",
+          "question": "为什么选择这个顺序",
+          "question_evidence": ["s-0003"],
+          "answer_evidence": ["s-0004"],
+          "relation_confidence": 1.0
+        }
+      ],
+      "candidate_questions": [
+        {"question": "如何衡量数据库稳定性", "evidence": ["s-0007"]}
+      ]
+    },
+    "claims.json": {
+      "schema_version": 1,
+      "claims": [
+        {
+          "claim_id": "c-001",
+          "question_id": "q-002",
+          "claim": "该缓存操作顺序可以完全避免读到旧数据",
+          "version_context": null,
+          "verdict": "unverified",
+          "evidence_segments": ["s-0004"],
+          "sources": [],
+          "explanation": "虚构演示未联网核验；不得将此项当作技术结论。"
+        }
+      ]
+    },
+    "scores.json": {
+      "schema_version": 1,
+      "questions": [
+        {
+          "question_id": "q-001",
+          "dimensions": {"correctness": 3, "completeness": 3, "structure": 3, "clarity": 3},
+          "total": 12,
+          "evidence": ["s-0002"],
+          "notes": "仅用于展示评分结构。"
+        },
+        {
+          "question_id": "q-002",
+          "dimensions": {"correctness": 2, "completeness": 2, "structure": 3, "clarity": 3},
+          "total": 10,
+          "evidence": ["s-0004"],
+          "notes": "示例分数不代表真实能力评估。"
+        }
+      ],
+      "overall": {"professional": 3, "credibility": 3, "structure": 3, "stability": 3}
+    },
+    "profile-patch.json": {
+      "schema_version": 1,
+      "changes": [
+        {
+          "change_id": "demo-cache-consistency-001",
+          "type": "knowledge_state",
+          "key": "redis/cache-consistency",
+          "status": "pending",
+          "evidence": ["s-0004", "s-0006"],
+          "reason": "虚构演示中的失败场景尚未回答。",
+          "value": {
+            "grade": "D",
+            "scores": {"accuracy": 2, "completeness": 2, "retrieval_stability": 3, "expression": 3}
+          }
+        }
+      ]
+    },
+    "jd-matrix.json": {
+      "schema_version": 1,
+      "requirements": [
+        {
+          "requirement": "缓存一致性",
+          "coverage": "deep",
+          "performance": "weak",
+          "evidence_questions": ["q-001", "q-002"],
+          "next_priority": "high",
+          "inference_note": "仅用于展示 JD 能力矩阵。"
+        }
+      ]
+    }
+  }
+}

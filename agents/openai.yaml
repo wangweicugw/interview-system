@@ -1,0 +1,6 @@
+interface:
+  display_name: "个人面试系统"
+  short_description: "复盘真实面试、核验技术回答并持续沉淀个人长期能力档案"
+  default_prompt: "使用 $interview-system 导入并复盘这场真实面试。"
+policy:
+  allow_implicit_invocation: true

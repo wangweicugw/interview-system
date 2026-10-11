@@ -1,0 +1,2 @@
+# PDF 文字层提取；扫描版 PDF 还需本机 pdftoppm 与 Apple Vision 或 Tesseract。
+pypdf>=5,<7
