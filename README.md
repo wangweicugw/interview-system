@@ -1,5 +1,8 @@
 # interview-system
 
+[![tests](https://github.com/wangweicugw/interview-system/actions/workflows/tests.yml/badge.svg)](https://github.com/wangweicugw/interview-system/actions/workflows/tests.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 许可证：[MIT](LICENSE)。本仓库的许可证不授予第三方语音模型、Python 依赖或用户面试资料的再分发权利。
 
 本地优先的面试复盘 Skill。它把逐字稿、JD、简历和可选的录音整理为可追溯的单场报告与长期档案。单场页逐题展示原始问题、现场回答、回答问题（AI 判断）、推荐答案和相关文档；全量题库页提供高频问法、搜索、确认中心、脱稿计时练习和复习计划。浏览器操作先导出本地 JSON，再由 Skill 校验并追加修订。也提供算法题陪练、本地资料备份与安全恢复。当前支持 Codex 入口和 WorkBuddy 适配包。完整工作规则见 [SKILL.md](SKILL.md)。
@@ -9,10 +12,14 @@
 需要 Python 3.10 或更新版本。将本目录复制到 Codex 的 `skills/interview-system`，然后在你的环境安装基础依赖。以下命令以 macOS/Linux 为例；Windows 宿主尚未完成集成验收。
 
 ```bash
+git clone https://github.com/wangweicugw/interview-system.git
+cd interview-system
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python scripts/doctor.py
 ```
+
+验证通过后，把该目录复制到你的 Codex Skills 目录；也可以保留克隆目录并按本机配置建立链接。不要把私有数据目录放进此仓库。
 
 `doctor.py` 只检查当前 Python 和本机命令是否具备候选能力，不读取面试资料或令牌；引擎存在不代表模型已经缓存。扫描版 PDF 还需要 `pdftoppm` 与 Apple Vision 或 Tesseract 中文语言数据。音频安装检查与短片段实测见 [本地语音向导](references/local-audio-setup.md)，转写与说话人分离规则见 [音频说明](references/audio-and-html.md)，扫描件见 [OCR 说明](references/pdf-ocr.md)。
 `check_data_compatibility.py` 用于已初始化的数据目录；只读检查版本，不执行自动迁移。
