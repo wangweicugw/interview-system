@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Callable
 
-from common import SCHEMA_VERSION, now_iso
+from common import SCHEMA_VERSION, append_private_text, now_iso
 
 
 Migration = Callable[[Path], list[str]]
@@ -65,8 +65,7 @@ def apply(root: Path, target: int, backup: Path | None) -> dict:
         changed = MIGRATIONS[(step["from"], step["to"])](root)
         completed.append({**step, "changed_files": changed})
     log = root / "events" / "store-migrations.jsonl"
-    with log.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps({
+    append_private_text(log, json.dumps({
             "schema_version": SCHEMA_VERSION,
             "migrated_at": now_iso(),
             "backup": str(backup.resolve()),

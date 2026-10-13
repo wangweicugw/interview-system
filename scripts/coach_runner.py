@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import resource
+import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -13,6 +15,8 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
+
+from common import write_private_text
 
 
 HARNESS = r"""
@@ -95,19 +99,42 @@ def _execute(command: list[str], data: dict[str, Any], timeout: int, *, cwd: Pat
     return payload
 
 
-def run_case(solution: Path, data: dict[str, Any], language: str, runner: str, image: str | None = None) -> dict[str, Any]:
+def _java_args(java_spec: dict[str, Any] | None) -> list[str]:
+    if not java_spec:
+        return ["solve", "__map__", "return", ""]
+    return [
+        java_spec["method"], ",".join(java_spec["input_keys"]),
+        java_spec.get("result_mode", "return"), java_spec.get("result_key", ""),
+    ]
+
+
+def _stage_java_harness(solution: Path, destination: Path) -> None:
+    source = JAVA_HARNESS.read_text(encoding="utf-8")
+    solution_text = solution.read_text(encoding="utf-8", errors="replace")
+    for name in ("ListNode", "TreeNode"):
+        if re.search(rf"\bclass\s+{name}\b", solution_text):
+            marker = re.compile(
+                rf"\n// COACH_{name.replace('Node', '_NODE').upper()}_START.*?"
+                rf"// COACH_{name.replace('Node', '_NODE').upper()}_END\n?", re.DOTALL,
+            )
+            source = marker.sub("\n", source)
+    write_private_text(destination, source)
+
+
+def run_case(solution: Path, data: dict[str, Any], language: str, runner: str, image: str | None = None,
+             java_spec: dict[str, Any] | None = None) -> dict[str, Any]:
     if runner == "local":
         if language == "python":
             return _execute([sys.executable, "-I", "-S", "-c", HARNESS, str(solution)], data, 3, cwd=solution.parent)
         with tempfile.TemporaryDirectory(prefix="coach-java-") as temporary:
             work = Path(temporary)
             shutil.copy2(solution, work / "Solution.java")
-            shutil.copy2(JAVA_HARNESS, work / "CoachHarness.java")
+            _stage_java_harness(solution, work / "CoachHarness.java")
             compile_result = subprocess.run(["javac", "-d", str(work), str(work / "Solution.java"), str(work / "CoachHarness.java")],
                                             text=True, capture_output=True, timeout=10, check=False)
             if compile_result.returncode:
                 return {"error": "Java 编译失败：" + compile_result.stderr[-1000:], "elapsed_ms": 0}
-            return _execute(["java", "-cp", str(work), "CoachHarness"], data, 3, cwd=work)
+            return _execute(["java", "-cp", str(work), "CoachHarness", *_java_args(java_spec)], data, 3, cwd=work)
 
     with tempfile.TemporaryDirectory(prefix="coach-container-") as temporary:
         work = Path(temporary)
@@ -118,7 +145,7 @@ def run_case(solution: Path, data: dict[str, Any], language: str, runner: str, i
         staged.chmod(0o644)
         if language == "java":
             harness = work / "CoachHarness.java"
-            shutil.copyfile(JAVA_HARNESS, harness)
+            _stage_java_harness(solution, harness)
             harness.chmod(0o644)
         container_name = "interview-coach-" + uuid.uuid4().hex[:12]
         base = [
@@ -132,5 +159,6 @@ def run_case(solution: Path, data: dict[str, Any], language: str, runner: str, i
         if language == "python":
             command = base + ["python", "-I", "-S", "-c", HARNESS, "/work/solution.py"]
         else:
-            command = base + ["sh", "-c", "javac -d /tmp /work/Solution.java /work/CoachHarness.java && java -cp /tmp CoachHarness"]
+            quoted = " ".join(shlex.quote(value) for value in _java_args(java_spec))
+            command = base + ["sh", "-c", "javac -d /tmp /work/Solution.java /work/CoachHarness.java && java -cp /tmp CoachHarness " + quoted]
         return _execute(command, data, 12 if language == "java" else 5, container_name=container_name)

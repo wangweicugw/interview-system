@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from check_data_compatibility import require_store_compatible
-from common import now_iso, read_json, sha256_file, write_json
+from common import append_private_text, now_iso, read_json, sha256_file, write_json
 
 
 COVERAGE_VALUES = {"none", "partial", "full"}
@@ -42,8 +42,7 @@ def existing_references(inputs: dict[str, Any]) -> list[dict[str, Any]]:
 
 def append_revision(case_path: Path, entry: dict[str, Any]) -> None:
     revisions = case_path / "reference-transcript-revisions.jsonl"
-    with revisions.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    append_private_text(revisions, json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 def main() -> int:

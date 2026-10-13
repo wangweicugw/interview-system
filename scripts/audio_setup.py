@@ -14,6 +14,7 @@ import uuid
 from pathlib import Path
 
 from transcribe_local_audio import find_result, local_model, make_command
+from common import open_private_text
 
 
 def defaults(root: Path, args: argparse.Namespace) -> None:
@@ -79,7 +80,7 @@ def smoke(args: argparse.Namespace) -> dict:
         if nltk.is_dir():
             env["NLTK_DATA"] = str(nltk.resolve())
         started = time.monotonic()
-        with (output / "engine.log").open("w", encoding="utf-8") as log:
+        with open_private_text(output / "engine.log") as log:
             try:
                 result = subprocess.run(command, text=True, stdout=log, stderr=subprocess.STDOUT,
                                         env=env, timeout=args.timeout, check=False)

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from check_data_compatibility import require_store_compatible
-from common import now_iso, write_json
+from common import now_iso, write_json, write_private_text
 from render_interview_html import TOPIC_LABELS, question_topic
 
 
@@ -182,7 +182,7 @@ def build(root: Path, *, limit: int) -> dict[str, Any]:
             f"{index}. [{item['practice_status']}] {item['question']}｜{item['company']}｜"
             + "、".join(item["priority_reasons"])
         )
-    (root / "profile" / "review-plan.md").write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    write_private_text(root / "profile" / "review-plan.md", "\n".join(lines).rstrip() + "\n")
     return {
         "status": "ok",
         "output": str(output),

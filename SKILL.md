@@ -11,11 +11,13 @@ description: 复盘真实面试并维护个人长期面试档案，也支持把�
 
 初次使用或更换宿主后，先运行 `<python> <skill-dir>/scripts/doctor.py` 检查本地候选能力；它不读取面试资料，也不能代替模型和 OCR 的实际验收。
 处理已有数据目录前，运行 `<python> <skill-dir>/scripts/check_data_compatibility.py --root <data-root>`；若核心数据版本不兼容，停止写入，不得直接改版本号。若仅派生分析产物损坏，可用 `--core-only` 确认原始证据后重做分析，修复前不得归档或渲染。详见 [references/schemas.md](references/schemas.md)。
+首次处理真实面试资料，或用户扩大数据/网络授权时，必须先读 [references/privacy-and-security.md](references/privacy-and-security.md)，说明当前宿主的可验证边界，并在读取完整敏感内容进入模型上下文前获得数据类别与用途授权。
 需要演示文稿闭环时，可在一个不存在或为空的目录运行 `<python> <skill-dir>/scripts/demo_smoke.py --root <演示目录>`；它只处理虚构材料，内置分析不得套用到真实面试。
 
 ## 路由
 
 - 导入或复盘面试：执行“文稿闭环”。先读 [references/workflow.md](references/workflow.md)、[references/scoring.md](references/scoring.md) 和 [references/html-presentation.md](references/html-presentation.md)；技术题再读 [references/fact-checking.md](references/fact-checking.md)。
+- 用户询问数据是否离线、是否会上传、要求 `local-only` / `cloud-assisted` 或要处理真实敏感资料：读 [references/privacy-and-security.md](references/privacy-and-security.md)。
 - 更新面试结果、修订逐字稿或补充资料：读 [references/workflow.md](references/workflow.md) 的修订与事件规则，并按 [references/html-presentation.md](references/html-presentation.md) 重建全部 HTML。
 - 查看长期档案、按真实面试问题练习或准备下一场：读 [references/profile-and-prep.md](references/profile-and-prep.md) 和 [references/html-presentation.md](references/html-presentation.md)；现有面试的统一入口是数据目录下的 `interview-history.html`，全量题库入口是 `interview-question-bank.html`，单场页“用本场问题练习”可追溯提问与回答原文。
 - 用户从题库页面导出确认、修订或练习操作：运行 `apply_review_actions.py --root <data-root> --actions <导出的JSON>`，再运行 `audit_standard_answers.py --reset-confirmed-stale`、`build_review_plan.py` 和全量 HTML 重建。导出文件只是待应用操作，未通过旧状态和全量引用预校验前不得宣称已经写入。成熟答案和高频分组的文本修订要在私有修订日志中保留完整的修改前后快照。
@@ -27,8 +29,10 @@ description: 复盘真实面试并维护个人长期面试档案，也支持把�
 - 用户要求安装、检查或实测本地语音：读 [references/local-audio-setup.md](references/local-audio-setup.md)，用 `audio_setup.py check` 查依赖，再用自有短语音运行 `smoke`；两者结果不得混淆。
 - 旧场次先由文字稿导入、后来补充录音而无法通过当前音频校验时，按 [references/audio-and-html.md](references/audio-and-html.md) 的旧格式迁移规则核对来源并登记，不覆盖 `transcript.raw.json`。
 - 用户提供扫描 PDF：读 [references/pdf-ocr.md](references/pdf-ocr.md)，本地提取并核对页面来源；面试文稿、JD 和简历均可使用。
-- 用户要求算法题陪练：读 [references/algorithm-coach.md](references/algorithm-coach.md)，支持 Python/Java；默认容器隔离运行，只有代码已审阅且用户明确选择本机模式时才用 `--runner local --trust-solution`。
-- 用户要求备份、恢复或数据格式升级：先用 `backup_store.py create` 生成本地未加密备份并用 `verify` 校验；恢复只允许到不存在或空目录。格式升级使用 `migrate_store.py`，没有显式注册的逐版本转换就停止，不能猜测字段。
+- 用户要求算法题陪练：读 [references/algorithm-coach.md](references/algorithm-coach.md)。它是本 Skill 的一条路线，不创建独立 Skill/App。默认 Java 第一周计划和 60 分钟训练，逐题按 L0-L4 提示协议推进；先运行 `today` 或 `resume`，每次只问一个开放式问题并记录阶段。独立思考阶段禁止从题名、主题标签、介绍、追问、选项、复杂度目标、代码骨架或反馈中明示、暗示算法名称与解题数据结构；用户提出低效方案时先验证正确性，不抢先优化。只有用户主动提出策略后才讨论其实现、复杂度和优化，只有用户明确继续要提示才进入下一提示级别。静态检查不得冒充编译或测试；默认容器隔离运行，只有代码已审阅且用户明确选择本机模式时才用 `--runner local --trust-solution`。只有用户明确要求时才用 `link-gap` 关联真实面试知识缺口，且只保存标识和相对路径，不复制敏感原文。
+- 用户要求动态周计划、扫描历史算法考点、分析口述思路、导出错题/周报/冲刺清单或练习链表/树/网格题：另读 [references/algorithm-advanced.md](references/algorithm-advanced.md)。历史扫描默认只读，只有用户确认时才应用候选；口述关键词覆盖不等于语义正确或能力掌握。
+- 用户要求备份、恢复或数据格式升级：优先用 `backup_store.py create --recipient <age公钥>` 或交互式 `--passphrase` 生成 `age` 加密备份，再用相应 `--identity` 或 `--passphrase` 执行 `verify`；不自动安装 `age`，缺失或失败时停止且不得回退明文。只有用户明确接受机密性风险时才用 `--allow-plaintext`。恢复只允许到不存在或空目录。格式升级使用 `migrate_store.py`，没有显式注册的逐版本转换就停止，不能猜测字段。
+- 用户要求隐私自检或准备删除档案：运行 `privacy_check.py --root <data-root>`，仅在用户明确指定时追加 `--backup-path`；检查结果不等于云端策略证明。先报告风险，不自动改权限、Git 配置、历史或文件。删除前先验证加密备份并核对精确目录；递归删除、清空废纸篓、历史重写和强制推送都必须由用户另行明确授权。
 
 ## 不可破坏的规则
 
@@ -36,6 +40,7 @@ description: 复盘真实面试并维护个人长期面试档案，也支持把�
 - 没有时间戳就使用 `segment_id`，不得推造时间。
 - 说话人明确时直接采用；存在歧义时先让用户确认，再生成正式追问树。
 - 音频仅可在用户明确要求时使用本地引擎处理；不得将录音、完整逐字稿、简历或未公开项目资料上传至第三方。缺少本地引擎或需下载模型时，先说明影响并取得相应授权。
+- “本地优先”不等于 AI 推理完全离线；`config.json.local_only` 只是历史兼容字段，不能作为宿主网络隔离证据。`local-only` 模式下，云端代理不得读取敏感原文来执行 AI 复盘；`cloud-assisted` 只能使用用户明确授权的数据类别和用途。
 - 自动说话人分离、双声道和语义角色分配必须分别标注方法。置信度只记录引擎实际提供的可解释数值；没有则为 `null`，不得编造。语义分配不是 diarization；未可靠分离时，短应答、重叠语音和混合片段不得当作已确认说话人事实。
 - 无时间戳或无说话人标签的参考文字稿只能校对术语和语义，必须保留独立快照；不得覆盖原始带时间戳转写、补造时间戳或作为确定的说话人映射。
 - HTML/PDF 等展示件是派生产物，不是事实源；内容必须可追溯回 case 中的原文、结构化分析或来源链接。
@@ -45,6 +50,8 @@ description: 复盘真实面试并维护个人长期面试档案，也支持把�
 - 联网查询只发送必要的技术问题，不发送完整逐字稿、简历、公司私密信息或未公开项目数据。
 - 所有长期档案变化都记录；状态只能是 `pending`、`confirmed`、`rejected`。待确认内容可以检索，但生成推荐答案时必须提示其状态。
 - 脱稿练习回答保存在 `<data-root>/practice/private/`，题库页面只把回答暂存于当前浏览器的本地操作队列；导出并应用后才进入档案。练习自评和排序不是能力认证。
+- 算法静态检查只能生成候选问题，未实际编译运行不得声称通过；实际用例全通过且未用提示/答案，才可标记 `independent_passed`。算法进度可关联长期档案的 `algorithm_weakness`，但不能自动升级为已确认能力。
+- 算法陪练的独立思考阶段是不可破坏边界：不得提前说出或影射算法、数据结构、状态定义、遍历顺序、关键不变量、目标复杂度或伪代码；不得用选择题让用户反推答案。题目给定的输入结构和接口签名可以展示，但代码骨架不得包含策略性变量名、导入或注释。用户当前方案即使低效也先检查正确性；未记录用户主动提出的策略，不得进入策略实现讨论。
 - 跨场成熟答案属于私有档案，不写入 Skill 源码、模板或公开包；Skill 只保存生成规则、数据契约、校验器和展示逻辑。
 - 不编造项目职责、结果数字、事故经历或面试官意图。
 - 不生成通过率预测，也不把面试结果解释成单一题目的因果结果。
@@ -55,7 +62,7 @@ description: 复盘真实面试并维护个人长期面试档案，也支持把�
 1. 若数据目录尚未初始化，运行：
 
    ```bash
-   <python> <skill-dir>/scripts/init_store.py --root <data-root> --init-git
+   <python> <skill-dir>/scripts/init_store.py --root <data-root>
    ```
 
 2. 导入文稿。材料不齐时仍可继续，只有文稿为必需：
@@ -158,22 +165,22 @@ description: 复盘真实面试并维护个人长期面试档案，也支持把�
 
 ## 跨宿主分发
 
-公开发布源码前运行 `<python> <skill-dir>/scripts/check_public_release.py --strict`，并人工核对 Git 待提交文件和历史；真实面试数据目录不得作为源码仓库发布。发布检查器发现缺少许可证时应停止，由维护者选择许可证，不自动代选。
+公开发布源码前运行 `<python> <skill-dir>/scripts/check_public_release.py --strict`；它分别扫描工作区、实际 Git 暂存区和当前本地可见历史，但不代替专用密钥扫描与人工复核。真实面试数据目录不得作为源码仓库发布。发布检查器发现缺少许可证时应停止，由维护者选择许可证，不自动代选；发现历史风险时只报告，不自动改写历史。
 
-本文件是 Codex 入口，不能直接作为 WorkBuddy 包的 `SKILL.md`：两者的前置字段与资源引用语法不同。需要 WorkBuddy 使用时，生成其专用薄适配包；核心的 `references/`、`scripts/` 和隐私约束保持一致：
+项目只维护一个不针对宿主改写的发行包，不为 Codex、Claude、Trae、WorkBuddy 或其他软件复制入口、脚本和规则：
 
 ```bash
-<python> <skill-dir>/scripts/build_workbuddy_package.py \
+<python> <skill-dir>/scripts/build_release_package.py \
   --source <skill-dir> \
-  --output <输出目录>/interview-system-workbuddy.zip
+  --output <输出目录>/interview-system.zip
 ```
 
-该命令只打包技能定义、参考资料、脚本和可选依赖说明，不包含任何 case、录音、逐字稿、简历或长期档案。导入前仍须由用户检查 WorkBuddy 的文件与命令权限。
+发行前先执行完整隐私审计；打包只接受显式清单中的规范 `SKILL.md`、参考资料、脚本、资源和可选宿主元数据，拒绝未知资源和符号链接。写出 ZIP 后重新核对文件清单、普通文件类型、大小和 SHA-256。发行包不包含测试、case、录音、逐字稿、简历或长期档案。不同宿主的自动发现、资源引用和命令权限并不等价；未在对应宿主实测前只能标记为“未验证”，不能为兼容而生成专用变体。若宿主不能自动导入，用户可在授权本地文件与命令权限后，让其读取包内 `SKILL.md`；这不等于原生兼容。
 
 ## 当前范围
 
 - 已实现：TXT/Markdown/DOCX/PDF 文稿导入，本地 MLX Whisper/WhisperX 转写适配、WhisperX/pyannote 匿名说话人分离、已有转写结果导入、JD/简历文本与扫描 PDF OCR、音频与文稿去重、说话人确认、逐字稿修订、分析校验、长期档案、离线 HTML，以及本地算法题练习闭环。
 - 转写和说话人分离依赖已安装的本地引擎与已缓存模型；PDF 依赖 `pypdf`，扫描页还需 `pdftoppm` 和本机可用的 Apple Vision 或 Tesseract 语言数据。中文 OCR 在受限宿主中可能不可用，需明确报错而非默默用英文模型代替。
 - 通知和云同步不属于本 Skill 的核心职责：提醒交由宿主的日程或自动化能力按用户授权触发；跨设备同步交由用户选择的存储服务处理。本 Skill 不持有云凭据，也不自动上传面试资料。
-- 已实现本地 ZIP 备份、哈希校验、空目录恢复和逐版本迁移框架；备份不加密且不包含虚拟环境、模型、日志和 Git 元数据。当前数据仍只有 v1，没有凭空创建 v2 转换。`migrate_legacy_audio.py` 只处理一种 v1 内旧音频元数据。
+- 已实现 `age` 收件人/交互口令加密备份、显式风险确认后的明文 ZIP、哈希校验、空目录恢复和逐版本迁移框架；备份不包含虚拟环境、模型、日志和 Git 元数据。`age` 是可选外部命令，不自动安装；当前数据仍只有 v1，没有凭空创建 v2 转换。`migrate_legacy_audio.py` 只处理一种 v1 内旧音频元数据。
 - 公司背景调研可以在准备面试时单独使用联网检索，不是本地复盘流程的前置条件。

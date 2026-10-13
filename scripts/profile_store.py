@@ -5,7 +5,15 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
-from common import SCHEMA_VERSION, now_iso, read_json, sha256_text, write_json
+from common import (
+    SCHEMA_VERSION,
+    append_private_text,
+    now_iso,
+    read_json,
+    sha256_text,
+    write_json,
+    write_private_text,
+)
 
 
 def event_log_path(root: Path) -> Path:
@@ -44,9 +52,7 @@ def append_event(root: Path, event: dict[str, Any]) -> None:
     if state.is_file():
         read_json(state)
     path = event_log_path(root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(event, ensure_ascii=False) + "\n")
+    append_private_text(path, json.dumps(event, ensure_ascii=False) + "\n")
 
 
 def content_hash(event: dict[str, Any]) -> str:
@@ -104,5 +110,5 @@ def rebuild_profile(root: Path) -> dict[str, Any]:
             lines.append(
                 f"- [{marker}] `{item.get('key', '')}` · {item.get('reason', '').strip() or '无说明'} · 来源 `{item.get('case_id', '')}`"
             )
-    (profile_dir / "summary.md").write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    write_private_text(profile_dir / "summary.md", "\n".join(lines).rstrip() + "\n")
     return state

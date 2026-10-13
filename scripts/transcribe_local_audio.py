@@ -14,6 +14,7 @@ import uuid
 from pathlib import Path
 
 from check_data_compatibility import require_store_compatible
+from common import open_private_text, write_private_text
 
 def executable_for(engine: str, supplied: Path | None) -> Path:
     if supplied:
@@ -97,7 +98,7 @@ def text_view(raw: Path, target: Path) -> None:
         stamp = f"[{start:.2f}s] " if isinstance(start, (float, int)) else ""
         speaker = f"{item['speaker']}：" if item.get("speaker") else ""
         lines.append(stamp + speaker + text)
-    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_private_text(target, "\n".join(lines) + "\n")
 
 
 def main() -> int:
@@ -151,7 +152,7 @@ def main() -> int:
         command = make_command(args, executable, output)
         print(json.dumps({"phase": "recognizing", "engine": args.engine}, ensure_ascii=False), flush=True)
         started = time.monotonic()
-        with (output / "engine.log").open("w", encoding="utf-8") as log:
+        with open_private_text(output / "engine.log") as log:
             process = subprocess.Popen(command, env=offline_env, text=True, stdout=log, stderr=subprocess.STDOUT)
             try:
                 while True:

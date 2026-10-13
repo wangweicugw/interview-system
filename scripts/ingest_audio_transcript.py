@@ -19,6 +19,7 @@ from typing import Any
 from check_data_compatibility import require_store_compatible
 from common import (
     SCHEMA_VERSION,
+    copy_private_file,
     format_timecode,
     infer_role,
     now_iso,
@@ -28,6 +29,7 @@ from common import (
     sha256_file,
     sha256_text,
     write_json,
+    write_private_text,
 )
 from ingest_transcript import store_optional_document
 
@@ -405,11 +407,11 @@ def copy_raw_artifacts(
     primary: Path, extras: list[Path], private: Path
 ) -> tuple[str, list[str]]:
     primary_target = private / f"transcription.raw{primary.suffix.lower()}"
-    shutil.copy2(primary, primary_target)
+    copy_private_file(primary, primary_target)
     outputs = [str(primary_target.relative_to(private.parent))]
     for index, source in enumerate(extras, start=1):
         target = private / f"transcription.extra-{index:02d}{source.suffix.lower()}"
-        shutil.copy2(source, target)
+        copy_private_file(source, target)
         outputs.append(str(target.relative_to(private.parent)))
     return outputs[0], outputs
 
@@ -525,12 +527,12 @@ def main() -> int:
         private.mkdir(mode=0o700)
 
         audio_target = private / f"audio-original{audio.suffix.lower()}"
-        shutil.copy2(audio, audio_target)
+        copy_private_file(audio, audio_target)
         primary_raw, raw_outputs = copy_raw_artifacts(transcript_source, extras, private)
         prompt_info = None
         if prompt_file:
             prompt_target = private / f"transcription-prompt{prompt_file.suffix.lower() or '.txt'}"
-            shutil.copy2(prompt_file, prompt_target)
+            copy_private_file(prompt_file, prompt_target)
             prompt_info = {
                 "path": str(prompt_target.relative_to(stage)),
                 "sha256": sha256_file(prompt_target),
@@ -546,17 +548,13 @@ def main() -> int:
             "segments": segments,
         }
         write_json(stage / "transcript.raw.json", transcript_payload)
-        (stage / "transcript.md").write_text(
-            render_transcript(case_id, segments), encoding="utf-8"
-        )
+        write_private_text(stage / "transcript.md", render_transcript(case_id, segments))
         source_lines = [f"# 本地转写文本视图 · {case_id}", ""]
         for segment in segments:
             timecode = format_timecode(segment.get("start"))
             label = segment.get("speaker_label") or "未标注"
             source_lines.append(f"[{timecode}] {label}：{segment['text_raw']}")
-        (stage / "source.md").write_text(
-            "\n".join(source_lines).rstrip() + "\n", encoding="utf-8"
-        )
+        write_private_text(stage / "source.md", "\n".join(source_lines).rstrip() + "\n")
 
         write_json(
             stage / "speaker-map.json",

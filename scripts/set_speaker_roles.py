@@ -12,6 +12,7 @@ from common import (
     read_json,
     render_transcript,
     write_json,
+    write_private_text,
 )
 
 
@@ -97,9 +98,7 @@ def main() -> int:
         segment["role"] = role
         segment["role_confidence"] = 1.0 if role != "unknown" else 0.0
     write_json(case_path / "transcript.revised.json", revised)
-    transcript_md.write_text(
-        render_transcript(raw["case_id"], revised["segments"]), encoding="utf-8"
-    )
+    write_private_text(transcript_md, render_transcript(raw["case_id"], revised["segments"]))
 
     manifest_path = case_path / "manifest.json"
     manifest = read_json(manifest_path)

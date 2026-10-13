@@ -16,7 +16,7 @@ from typing import Any
 from check_data_compatibility import require_store_compatible
 from check_question_clusters import validate_question_clusters
 from check_standard_answers import validate_standard_answers
-from common import now_iso, write_json
+from common import append_private_text, now_iso, write_json
 
 
 def _read_object(path: Path, label: str) -> dict[str, Any]:
@@ -160,9 +160,10 @@ def split_entries(root: Path, spec_path: Path) -> dict[str, Any]:
         } for item_id in new_cluster_index]),
     )
     for path, revisions in revision_sets:
-        with path.open("a", encoding="utf-8") as handle:
-            for revision in revisions:
-                handle.write(json.dumps(revision, ensure_ascii=False) + "\n")
+        append_private_text(
+            path,
+            "".join(json.dumps(revision, ensure_ascii=False) + "\n" for revision in revisions),
+        )
 
     return {
         "status": "split",

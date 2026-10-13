@@ -81,15 +81,26 @@ def scan_store(root: Path, *, include_optional: bool = True) -> dict[str, Any]:
             if include_optional:
                 for name in OPTIONAL_CASE_FILES:
                     inspect(case / name)
-    sessions = root / "algorithms" / "sessions"
-    if sessions.is_symlink():
-        report(sessions, "练习目录不能是符号链接")
-    elif sessions.is_dir():
-        for session in sorted(sessions.iterdir()):
-            if session.is_symlink():
-                report(session, "练习会话不能是符号链接")
-            elif session.is_dir():
-                inspect(session / "session.json", required=True)
+    algorithms = root / "algorithms"
+    sessions = algorithms / "sessions"
+    if algorithms.is_symlink():
+        report(algorithms, "算法学习目录不能是符号链接")
+    else:
+        if sessions.is_symlink():
+            report(sessions, "练习目录不能是符号链接")
+        elif sessions.is_dir():
+            for session in sorted(sessions.iterdir()):
+                if session.is_symlink():
+                    report(session, "练习会话不能是符号链接")
+                elif session.is_dir():
+                    inspect(session / "session.json", required=True)
+        inspect(algorithms / "progress.json")
+        plans = algorithms / "plans"
+        if plans.is_symlink():
+            report(plans, "算法周计划目录不能是符号链接")
+        elif plans.is_dir():
+            for plan in sorted(plans.glob("*.json")):
+                inspect(plan)
     inspect(root / "profile" / "next-interview-prep.json")
     if include_optional:
         for name in (

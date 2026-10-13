@@ -10,7 +10,7 @@ from typing import Any
 
 from analysis_state import current_errors
 from check_data_compatibility import require_store_compatible
-from common import SCHEMA_VERSION, now_iso, read_json, write_json
+from common import SCHEMA_VERSION, now_iso, read_json, write_json, write_private_text
 from labels_zh import label
 
 
@@ -251,7 +251,7 @@ def main() -> int:
     output = ensure_inside(root, output, "输出文件")
     json_output = output.with_suffix(".json")
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(markdown(brief), encoding="utf-8")
+    write_private_text(output, markdown(brief))
     write_json(json_output, brief)
     print(
         json.dumps(

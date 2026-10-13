@@ -14,7 +14,7 @@ from typing import Any
 from check_data_compatibility import require_store_compatible
 from check_question_clusters import validate_question_clusters
 from check_standard_answers import validate_standard_answers
-from common import now_iso, write_json
+from common import append_private_text, now_iso, write_json
 from profile_store import append_event, content_hash, latest_events, load_revisions, rebuild_profile
 from record_practice_attempt import _question, record_attempt
 
@@ -272,9 +272,10 @@ def apply_actions(root: Path, action_file: Path) -> dict[str, Any]:
     ):
         if revisions:
             path = root / relative
-            with path.open("a", encoding="utf-8") as handle:
-                for revision in revisions:
-                    handle.write(json.dumps(revision, ensure_ascii=False) + "\n")
+            append_private_text(
+                path,
+                "".join(json.dumps(revision, ensure_ascii=False) + "\n" for revision in revisions),
+            )
     for event in profile_revisions:
         append_event(root, event)
     if profile_revisions:

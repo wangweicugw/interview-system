@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -11,6 +10,7 @@ from typing import Any
 from check_data_compatibility import require_store_compatible
 from common import (
     SCHEMA_VERSION,
+    copy_private_file,
     now_iso,
     parse_transcript,
     read_json,
@@ -19,6 +19,7 @@ from common import (
     safe_component,
     sha256_text,
     write_json,
+    write_private_text,
 )
 
 
@@ -48,7 +49,7 @@ def store_optional_document(
     private = case_path / "private"
     private.mkdir(parents=True, exist_ok=True)
     destination = private / f"{name}{source.suffix.lower()}"
-    shutil.copy2(source, destination)
+    copy_private_file(source, destination)
 
     try:
         if source.suffix.lower() == ".pdf":
@@ -70,7 +71,7 @@ def store_optional_document(
         )
 
     markdown_path = case_path / f"{name}.md"
-    markdown_path.write_text(f"# {name.upper()}\n\n{text}\n", encoding="utf-8")
+    write_private_text(markdown_path, f"# {name.upper()}\n\n{text}\n")
     ocr_warning = (
         f"{name} 包含 OCR 页面；请核对识别文字后再用于分析"
         if page_methods and any(item["method"] != "text_layer" for item in page_methods)
@@ -149,10 +150,8 @@ def main() -> int:
     private = case_path / "private"
     private.mkdir(mode=0o700)
     raw_copy = private / f"original-transcript{source.suffix.lower()}"
-    shutil.copy2(source, raw_copy)
-    (case_path / "source.md").write_text(
-        f"# 原始文稿文本 · {case_id}\n\n{normalized}\n", encoding="utf-8"
-    )
+    copy_private_file(source, raw_copy)
+    write_private_text(case_path / "source.md", f"# 原始文稿文本 · {case_id}\n\n{normalized}\n")
 
     segments, speakers = parse_transcript(normalized)
     if not segments:
@@ -166,9 +165,7 @@ def main() -> int:
         "segments": segments,
     }
     write_json(case_path / "transcript.raw.json", transcript)
-    (case_path / "transcript.md").write_text(
-        render_transcript(case_id, segments), encoding="utf-8"
-    )
+    write_private_text(case_path / "transcript.md", render_transcript(case_id, segments))
 
     roles = {item.get("confirmed_role") for item in speakers if item.get("confirmed_role")}
     fully_labeled = all(item.get("confirmed_role") for item in speakers)

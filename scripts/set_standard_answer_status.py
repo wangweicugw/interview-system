@@ -7,24 +7,16 @@ import argparse
 import json
 import os
 import sys
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from check_standard_answers import validate_standard_answers
+from common import append_private_text, write_json
 
 
 def read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def write_json(path: Path, payload: Any) -> None:
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2)
-        handle.write("\n")
-        temporary = handle.name
-    os.replace(temporary, path)
 
 
 def main() -> int:
@@ -63,8 +55,7 @@ def main() -> int:
         "changed_at": changed_at,
     }
     log = root / "profile" / "standard-answer-revisions.jsonl"
-    with log.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(revision, ensure_ascii=False) + "\n")
+    append_private_text(log, json.dumps(revision, ensure_ascii=False) + "\n")
     print(json.dumps({
         "status": "updated",
         "answer_id": args.answer_id,

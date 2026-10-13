@@ -165,5 +165,225 @@
       {"input": {"n": 2, "operations": [["connected", 1, 1], ["union", 0, 1], ["union", 0, 1], ["connected", 0, 1]]}, "expected": [true, true], "public": false},
       {"input": {"n": 3, "operations": []}, "expected": [], "public": false}
     ]
+  },
+  {
+    "id": "leetcode-1",
+    "leetcode_id": 1,
+    "slug": "two-sum",
+    "url": "https://leetcode.com/problems/two-sum/",
+    "week_day": 1,
+    "unordered_result": true,
+    "title": "两数之和",
+    "topic": "数组与哈希表",
+    "topic_key": "hash",
+    "difficulty": "easy",
+    "statement": "给定整数数组 nums 和整数 target，返回两个不同元素的下标，使它们之和等于 target。每个输入恰好有一个答案，同一元素不能使用两次，答案顺序不限。",
+    "constraints": ["2 <= nums.length <= 10000", "恰好存在一个有效答案"],
+    "target_complexity": "时间 O(n)，空间 O(n)",
+    "hints": [
+      {"level": 1, "text": "遍历到当前数时，怎样判断它需要的另一个数是否已经出现？"},
+      {"level": 2, "text": "用哈希表保存已遍历数字到下标的映射；先查询补数，再插入当前数。"},
+      {"level": 3, "text": "for i: need=target-nums[i]; 若 map 有 need 则返回旧下标和 i；否则 put(nums[i],i)。"}
+    ],
+    "review_points": ["返回下标而非值", "同一元素不能复用", "重复数字", "查询必须早于插入"],
+    "oral_checks": [
+      {"id": "lookup_order", "label": "查询与插入顺序", "terms": ["先查后存", "先查询再插入", "补数"]}
+    ],
+    "java": {"signature": "int[] twoSum(int[] nums, int target)", "method": "twoSum", "input_keys": ["nums", "target"], "result_mode": "return"},
+    "reference_solution": {"java": "import java.util.*;\npublic class Solution {\n    public int[] twoSum(int[] nums, int target) {\n        Map<Integer,Integer> seen = new HashMap<>();\n        for (int i = 0; i < nums.length; i++) {\n            int need = target - nums[i];\n            if (seen.containsKey(need)) return new int[]{seen.get(need), i};\n            seen.put(nums[i], i);\n        }\n        throw new IllegalArgumentException(\"no solution\");\n    }\n}"},
+    "tests": [
+      {"input": {"nums": [2, 7, 11, 15], "target": 9}, "expected": [0, 1], "public": true},
+      {"input": {"nums": [3, 3], "target": 6}, "expected": [0, 1], "public": false},
+      {"input": {"nums": [-3, 4, 3, 90], "target": 0}, "expected": [0, 2], "public": false}
+    ]
+  },
+  {
+    "id": "leetcode-217",
+    "leetcode_id": 217,
+    "slug": "contains-duplicate",
+    "url": "https://leetcode.com/problems/contains-duplicate/",
+    "week_day": 2,
+    "title": "存在重复元素",
+    "topic": "数组与哈希集合",
+    "topic_key": "hash",
+    "difficulty": "easy",
+    "statement": "给定整数数组 nums，只要任一值至少出现两次就返回 true；所有元素互不相同则返回 false。",
+    "constraints": ["1 <= nums.length <= 100000"],
+    "target_complexity": "平均时间 O(n)，空间 O(n)",
+    "hints": [
+      {"level": 1, "text": "怎样在扫描时知道当前值以前是否出现过？"},
+      {"level": 2, "text": "HashSet.add 返回 false 表示该值已存在。"},
+      {"level": 3, "text": "逐个 add；某次 add 为 false 立即返回 true；循环结束返回 false。"}
+    ],
+    "review_points": ["HashSet.add 的布尔语义", "空泛去重描述", "提前返回"],
+    "oral_checks": [
+      {"id": "set_add_semantics", "label": "HashSet.add 返回值语义", "terms": ["add返回false", "返回false", "已经存在"]}
+    ],
+    "java": {"signature": "boolean containsDuplicate(int[] nums)", "method": "containsDuplicate", "input_keys": ["nums"], "result_mode": "return"},
+    "reference_solution": {"java": "import java.util.*;\npublic class Solution {\n    public boolean containsDuplicate(int[] nums) {\n        Set<Integer> seen = new HashSet<>();\n        for (int value : nums) if (!seen.add(value)) return true;\n        return false;\n    }\n}"},
+    "tests": [
+      {"input": {"nums": [1, 2, 3, 1]}, "expected": true, "public": true},
+      {"input": {"nums": [1, 2, 3, 4]}, "expected": false, "public": false},
+      {"input": {"nums": [1, 1]}, "expected": true, "public": false}
+    ]
+  },
+  {
+    "id": "leetcode-283",
+    "leetcode_id": 283,
+    "slug": "move-zeroes",
+    "url": "https://leetcode.com/problems/move-zeroes/",
+    "week_day": 3,
+    "title": "移动零",
+    "topic": "双指针",
+    "topic_key": "two-pointers",
+    "difficulty": "easy",
+    "statement": "将数组中的所有 0 移到末尾，同时保持非零元素相对顺序；必须原地修改数组。",
+    "constraints": ["原地修改", "保持非零元素相对顺序"],
+    "target_complexity": "时间 O(n)，额外空间 O(1)",
+    "hints": [
+      {"level": 1, "text": "能否让一个指针表示下一个非零元素应写入的位置？"},
+      {"level": 2, "text": "先顺序写回所有非零值，再把剩余位置补零。"},
+      {"level": 3, "text": "write=0；扫描 value，非零则 nums[write++]=value；最后 while(write<n) nums[write++]=0。"}
+    ],
+    "review_points": ["原地修改", "稳定顺序", "全零与无零"],
+    "java": {"signature": "void moveZeroes(int[] nums)", "method": "moveZeroes", "input_keys": ["nums"], "result_mode": "argument", "result_key": "0"},
+    "reference_solution": {"java": "public class Solution {\n    public void moveZeroes(int[] nums) {\n        int write = 0;\n        for (int value : nums) if (value != 0) nums[write++] = value;\n        while (write < nums.length) nums[write++] = 0;\n    }\n}"},
+    "tests": [
+      {"input": {"nums": [0, 1, 0, 3, 12]}, "expected": [1, 3, 12, 0, 0], "public": true},
+      {"input": {"nums": [0]}, "expected": [0], "public": false},
+      {"input": {"nums": [1, 2]}, "expected": [1, 2], "public": false}
+    ]
+  },
+  {
+    "id": "leetcode-26",
+    "leetcode_id": 26,
+    "slug": "remove-duplicates-from-sorted-array",
+    "url": "https://leetcode.com/problems/remove-duplicates-from-sorted-array/",
+    "week_day": 4,
+    "title": "删除有序数组中的重复项",
+    "topic": "双指针",
+    "topic_key": "two-pointers",
+    "difficulty": "easy",
+    "statement": "原地删除非递减数组中的重复项，使每个元素只出现一次；返回唯一元素个数 k，前 k 个位置必须为去重结果。",
+    "constraints": ["数组非递减", "原地修改"],
+    "target_complexity": "时间 O(n)，额外空间 O(1)",
+    "hints": [
+      {"level": 1, "text": "已确认的唯一前缀长度可以由哪个指针表示？"},
+      {"level": 2, "text": "读指针扫描；当前值不同于唯一前缀末尾时写入。"},
+      {"level": 3, "text": "空数组返回 0；write=1；从 read=1 扫描，不同则 nums[write++]=nums[read]。"}
+    ],
+    "review_points": ["空数组", "返回 k", "只检查前 k 个元素"],
+    "java": {"signature": "int removeDuplicates(int[] nums)", "method": "removeDuplicates", "input_keys": ["nums"], "result_mode": "return_and_prefix", "result_key": "0"},
+    "reference_solution": {"java": "public class Solution {\n    public int removeDuplicates(int[] nums) {\n        if (nums.length == 0) return 0;\n        int write = 1;\n        for (int read = 1; read < nums.length; read++)\n            if (nums[read] != nums[write - 1]) nums[write++] = nums[read];\n        return write;\n    }\n}"},
+    "tests": [
+      {"input": {"nums": [1, 1, 2]}, "expected": {"length": 2, "prefix": [1, 2]}, "public": true},
+      {"input": {"nums": [0, 0, 1, 1, 1, 2, 2, 3, 3, 4]}, "expected": {"length": 5, "prefix": [0, 1, 2, 3, 4]}, "public": false},
+      {"input": {"nums": []}, "expected": {"length": 0, "prefix": []}, "public": false}
+    ]
+  },
+  {
+    "id": "leetcode-125",
+    "leetcode_id": 125,
+    "slug": "valid-palindrome",
+    "url": "https://leetcode.com/problems/valid-palindrome/",
+    "week_day": 5,
+    "title": "验证回文串",
+    "topic": "双指针与字符串",
+    "topic_key": "two-pointers",
+    "difficulty": "easy",
+    "statement": "忽略大小写和非字母数字字符后，判断字符串是否为回文串。",
+    "constraints": ["仅比较字母和数字", "忽略大小写"],
+    "target_complexity": "时间 O(n)，额外空间 O(1)",
+    "hints": [
+      {"level": 1, "text": "左右指针遇到非字母数字字符时应该怎样移动？"},
+      {"level": 2, "text": "两端各自跳过无效字符，再做不区分大小写的比较。"},
+      {"level": 3, "text": "while(l<r)：左无效则 l++，右无效则 r--；否则比较小写字符并同时收缩。"}
+    ],
+    "review_points": ["空有效串", "数字", "大小写", "标点"],
+    "java": {"signature": "boolean isPalindrome(String s)", "method": "isPalindrome", "input_keys": ["s"], "result_mode": "return"},
+    "reference_solution": {"java": "public class Solution {\n    public boolean isPalindrome(String s) {\n        int left = 0, right = s.length() - 1;\n        while (left < right) {\n            while (left < right && !Character.isLetterOrDigit(s.charAt(left))) left++;\n            while (left < right && !Character.isLetterOrDigit(s.charAt(right))) right--;\n            if (Character.toLowerCase(s.charAt(left++)) != Character.toLowerCase(s.charAt(right--))) return false;\n        }\n        return true;\n    }\n}"},
+    "tests": [
+      {"input": {"s": "A man, a plan, a canal: Panama"}, "expected": true, "public": true},
+      {"input": {"s": "race a car"}, "expected": false, "public": false},
+      {"input": {"s": " "}, "expected": true, "public": false}
+    ]
+  },
+  {
+    "id": "leetcode-206",
+    "leetcode_id": 206,
+    "slug": "reverse-linked-list",
+    "url": "https://leetcode.com/problems/reverse-linked-list/",
+    "title": "反转链表",
+    "topic": "链表",
+    "topic_key": "linked-list",
+    "difficulty": "easy",
+    "statement": "给定单链表头节点，反转链表并返回新的头节点。",
+    "constraints": ["节点数可以为 0", "原地调整 next 指针"],
+    "target_complexity": "时间 O(n)，额外空间 O(1)",
+    "hints": [
+      {"level": 1, "text": "改变 current.next 前，需要先保存什么？"},
+      {"level": 2, "text": "维护 prev、current、next 三个引用。"},
+      {"level": 3, "text": "循环中先保存 next，再令 current.next=prev，随后整体前移。"}
+    ],
+    "review_points": ["空链表", "单节点", "保存 next 后再改指针", "返回 prev"],
+    "java": {"signature": "ListNode reverseList(ListNode head)", "method": "reverseList", "input_keys": ["head"], "result_mode": "linked_list"},
+    "reference_solution": {"java": "public class Solution {\n    public ListNode reverseList(ListNode head) {\n        ListNode prev = null, current = head;\n        while (current != null) {\n            ListNode next = current.next;\n            current.next = prev;\n            prev = current;\n            current = next;\n        }\n        return prev;\n    }\n}"},
+    "tests": [
+      {"input": {"head": [1, 2, 3, 4, 5]}, "expected": [5, 4, 3, 2, 1], "public": true},
+      {"input": {"head": [1]}, "expected": [1], "public": false},
+      {"input": {"head": []}, "expected": [], "public": false}
+    ]
+  },
+  {
+    "id": "leetcode-104",
+    "leetcode_id": 104,
+    "slug": "maximum-depth-of-binary-tree",
+    "url": "https://leetcode.com/problems/maximum-depth-of-binary-tree/",
+    "title": "二叉树的最大深度",
+    "topic": "二叉树与递归",
+    "topic_key": "tree",
+    "difficulty": "easy",
+    "statement": "给定二叉树根节点，返回从根到最远叶子节点的节点数。",
+    "constraints": ["空树深度为 0", "输入使用层序数组表示"],
+    "target_complexity": "时间 O(n)，递归栈 O(h)",
+    "hints": [
+      {"level": 1, "text": "当前节点的深度与左右子树深度有什么关系？"},
+      {"level": 2, "text": "递归返回左右子树较大深度再加 1。"},
+      {"level": 3, "text": "root==null 返回 0；否则返回 1+max(left,right)。"}
+    ],
+    "review_points": ["空树", "单节点", "递归终止条件", "树高导致的栈空间"],
+    "java": {"signature": "int maxDepth(TreeNode root)", "method": "maxDepth", "input_keys": ["root"], "result_mode": "return"},
+    "reference_solution": {"java": "public class Solution {\n    public int maxDepth(TreeNode root) {\n        if (root == null) return 0;\n        return 1 + Math.max(maxDepth(root.left), maxDepth(root.right));\n    }\n}"},
+    "tests": [
+      {"input": {"root": [3, 9, 20, null, null, 15, 7]}, "expected": 3, "public": true},
+      {"input": {"root": [1, null, 2]}, "expected": 2, "public": false},
+      {"input": {"root": []}, "expected": 0, "public": false}
+    ]
+  },
+  {
+    "id": "leetcode-200",
+    "leetcode_id": 200,
+    "slug": "number-of-islands",
+    "url": "https://leetcode.com/problems/number-of-islands/",
+    "title": "岛屿数量",
+    "topic": "网格搜索",
+    "topic_key": "graph-search",
+    "difficulty": "medium",
+    "statement": "给定由 1 和 0 组成的二维网格，计算上下左右相邻的陆地连通块数量。",
+    "constraints": ["只按上下左右连接", "测试桥接用字符串数组表示每一行"],
+    "target_complexity": "时间 O(mn)，最坏额外空间 O(mn)",
+    "hints": [
+      {"level": 1, "text": "遇到一块尚未访问的陆地时，怎样避免以后重复计数？"},
+      {"level": 2, "text": "每发现新陆地就计数，并用 DFS/BFS 标记整个连通块。"},
+      {"level": 3, "text": "双重循环找 '1'；计数后从该点搜索，把相邻 '1' 改为 '0'。"}
+    ],
+    "review_points": ["空边界检查", "上下左右四方向", "访问标记", "全水与单岛"],
+    "java": {"signature": "int numIslands(char[][] grid)", "method": "numIslands", "input_keys": ["grid"], "result_mode": "return"},
+    "reference_solution": {"java": "public class Solution {\n    public int numIslands(char[][] grid) {\n        int count = 0;\n        for (int r = 0; r < grid.length; r++) for (int c = 0; c < grid[r].length; c++)\n            if (grid[r][c] == '1') { count++; sink(grid, r, c); }\n        return count;\n    }\n    private void sink(char[][] g, int r, int c) {\n        if (r < 0 || r == g.length || c < 0 || c == g[r].length || g[r][c] != '1') return;\n        g[r][c] = '0';\n        sink(g,r+1,c); sink(g,r-1,c); sink(g,r,c+1); sink(g,r,c-1);\n    }\n}"},
+    "tests": [
+      {"input": {"grid": ["11110", "11010", "11000", "00000"]}, "expected": 1, "public": true},
+      {"input": {"grid": ["11000", "11000", "00100", "00011"]}, "expected": 3, "public": false},
+      {"input": {"grid": ["000", "000"]}, "expected": 0, "public": false}
+    ]
   }
 ]

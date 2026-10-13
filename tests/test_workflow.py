@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -25,7 +26,14 @@ from common import read_json, read_supported_text  # noqa: E402
 from coach_runner import run_case as run_coach_case  # noqa: E402
 from ingest_audio_transcript import normalize_segments, parse_artifact  # noqa: E402
 from pdf_ocr import extract_pdf  # noqa: E402
-from render_interview_html import discover_cases, jd_source, render_case, render_history_practice  # noqa: E402
+from render_interview_html import (  # noqa: E402
+    discover_cases,
+    external_link,
+    jd_source,
+    render_case,
+    render_history_practice,
+    safe_url,
+)
 
 
 def run_script(
@@ -651,6 +659,17 @@ class WorkflowTest(unittest.TestCase):
         HTMLParser().feed(case_html)
         HTMLParser().feed(history_html)
         HTMLParser().feed(question_bank_html)
+        for rendered_html in (case_html, history_html, question_bank_html):
+            self.assertIn('http-equiv="Content-Security-Policy"', rendered_html)
+            self.assertIn('default-src \'none\'', rendered_html)
+            self.assertIn('name="referrer" content="no-referrer"', rendered_html)
+            self.assertIn('data-store-id="', rendered_html)
+            self.assertNotRegex(rendered_html, r'<(?:script|img|link)[^>]+(?:src|href)="https?://')
+        self.assertIn("sessionStorage", question_bank_html)
+        self.assertIn("interview-system-review-actions-v2:${archiveId}", question_bank_html)
+        self.assertIn("在本机持久保存 30 天", question_bank_html)
+        self.assertIn("↗ 外部资料", question_bank_html)
+        self.assertIn("隐私提醒", case_html)
         self.assertIn("<td>深入考察</td>", case_html)
         self.assertIn("<td>高</td>", case_html)
         self.assertIn("表现较弱</span>", case_html)
@@ -1093,7 +1112,10 @@ class WorkflowTest(unittest.TestCase):
         self.assertGreaterEqual(health["sources"], 1)
 
         backup = Path(self.temp.name) / "interview-backup.zip"
-        created = run_script("backup_store.py", "create", "--root", str(self.root), "--output", str(backup))
+        created = run_script(
+            "backup_store.py", "create", "--root", str(self.root), "--output", str(backup),
+            "--allow-plaintext",
+        )
         self.assertFalse(created["encrypted"])
         verified = run_script("backup_store.py", "verify", "--backup", str(backup))
         self.assertEqual(verified["status"], "valid")
@@ -1119,10 +1141,25 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("根据 JD 截图人工转写", manual)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", manual)
 
-    def test_workbuddy_package_contains_renderer_without_private_data(self) -> None:
-        output = Path(self.temp.name) / "interview-system-workbuddy.zip"
+    def test_external_link_rejects_unsafe_urls_and_escapes_labels(self) -> None:
+        for value in (
+            "javascript:alert(1)",
+            "data:text/html,unsafe",
+            "https://user:secret@" + "example.invalid/path",
+            "https://example.com/path\nunsafe",
+        ):
+            self.assertIsNone(safe_url(value))
+        valid = "https://example.com/reference"
+        self.assertEqual(safe_url(valid), valid)
+        rendered = external_link(valid, '<script>alert("x")</script>')
+        self.assertNotIn("<script>", rendered)
+        self.assertIn("&lt;script&gt;", rendered)
+        self.assertIn("↗ 外部资料", rendered)
+
+    def test_release_package_keeps_canonical_entrypoint_without_private_data(self) -> None:
+        output = Path(self.temp.name) / "interview-system.zip"
         built = run_script(
-            "build_workbuddy_package.py",
+            "build_release_package.py",
             "--source",
             str(SKILL),
             "--output",
@@ -1130,8 +1167,20 @@ class WorkflowTest(unittest.TestCase):
         )
         self.assertEqual(built["status"], "created")
         self.assertFalse(built["contains_interview_cases"])
+        self.assertFalse(built["host_specific_rewrite"])
+        self.assertEqual(built["package_sha256"], hashlib.sha256(output.read_bytes()).hexdigest())
         with zipfile.ZipFile(output) as archive:
             names = archive.namelist()
+            packaged_skill = archive.read("interview-system/SKILL.md")
+            manifest = json.loads(archive.read("interview-system/MANIFEST.json"))
+            for entry in manifest["files"]:
+                body = archive.read(f"interview-system/{entry['path']}")
+                self.assertEqual(entry["size"], len(body))
+                self.assertEqual(entry["sha256"], hashlib.sha256(body).hexdigest())
+        self.assertEqual(packaged_skill, (SKILL / "SKILL.md").read_bytes())
+        self.assertFalse(manifest["host_specific_rewrite"])
+        self.assertEqual(manifest["entrypoint"], "SKILL.md")
+        self.assertEqual(built["file_count"], len(manifest["files"]) + 1)
         self.assertIn(
             "interview-system/scripts/render_interview_html.py", names
         )
@@ -1146,6 +1195,7 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("interview-system/assets/demo-case.json", names)
         self.assertIn("interview-system/scripts/demo_smoke.py", names)
         self.assertIn("interview-system/LICENSE", names)
+        self.assertIn("interview-system/agents/openai.yaml", names)
         self.assertIn(
             "interview-system/scripts/register_reference_transcript.py", names
         )
@@ -1154,6 +1204,24 @@ class WorkflowTest(unittest.TestCase):
             "interview-system/references/html-presentation.md", names
         )
         self.assertFalse(any("tests/" in name or "private/" in name for name in names))
+        blocked = run_script(
+            "build_release_package.py",
+            "--source",
+            str(SKILL),
+            "--output",
+            str(output),
+            expect=1,
+        )
+        self.assertIn("--force", blocked["error"])
+        rebuilt = run_script(
+            "build_release_package.py",
+            "--source",
+            str(SKILL),
+            "--output",
+            str(output),
+            "--force",
+        )
+        self.assertEqual(rebuilt["status"], "created")
 
     def test_ingest_local_audio_transcript_preserves_raw_evidence(self) -> None:
         audio = Path(self.temp.name) / "sample.wav"

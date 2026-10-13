@@ -12,8 +12,10 @@ from common import (
     parse_edited_transcript,
     read_json,
     render_transcript,
+    append_private_text,
     sha256_text,
     write_json,
+    write_private_text,
 )
 
 
@@ -87,9 +89,7 @@ def main() -> int:
         "segments": updated_segments,
     }
     write_json(revised_path, revised)
-    markdown_path.write_text(
-        render_transcript(raw["case_id"], updated_segments), encoding="utf-8"
-    )
+    write_private_text(markdown_path, render_transcript(raw["case_id"], updated_segments))
 
     revision = {
         "revision_id": f"rev-{updated_at}-{sha256_text(json.dumps(changes, ensure_ascii=False))[:8]}",
@@ -99,8 +99,7 @@ def main() -> int:
         "changes": changes,
     }
     revision_log = case_path / "transcript-revisions.jsonl"
-    with revision_log.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(revision, ensure_ascii=False) + "\n")
+    append_private_text(revision_log, json.dumps(revision, ensure_ascii=False) + "\n")
 
     manifest_path = case_path / "manifest.json"
     manifest = read_json(manifest_path)

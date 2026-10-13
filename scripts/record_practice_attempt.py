@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from check_data_compatibility import require_store_compatible
-from common import now_iso, sha256_text
+from common import append_private_text, now_iso, sha256_text, write_private_text
 
 
 def _question(root: Path, case_id: str, question_id: str) -> dict[str, Any] | None:
@@ -61,8 +61,7 @@ def record_attempt(
     private_dir = root / "practice" / "private"
     private_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     answer_path = private_dir / f"{attempt_id}.txt"
-    answer_path.write_text(answer + "\n", encoding="utf-8")
-    answer_path.chmod(0o600)
+    write_private_text(answer_path, answer + "\n")
     event = {
         "schema_version": 1,
         "attempt_id": attempt_id,
@@ -78,10 +77,7 @@ def record_attempt(
         "review_status": "pending",
     }
     log = root / "practice" / "attempts.jsonl"
-    log.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with log.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(event, ensure_ascii=False) + "\n")
-    log.chmod(0o600)
+    append_private_text(log, json.dumps(event, ensure_ascii=False) + "\n")
     return event
 
 

@@ -1,5 +1,7 @@
 # 文稿复盘工作流
 
+真实资料首次进入流程前，先按 `privacy-and-security.md` 确认 `local-only` 或 `cloud-assisted`，以及获授权的数据类别和用途。未完成这一步时，可运行不回显原文的本地格式/兼容性检查，不得读取完整敏感内容进入模型上下文。
+
 ## 输入
 
 - 必需：面试文稿，支持粘贴后的 TXT/Markdown、TXT、Markdown、DOCX。

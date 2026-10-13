@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import tempfile
 import zipfile
 from datetime import datetime, timezone
@@ -26,6 +27,7 @@ VERSIONED_JSON_NAMES = frozenset({
     "jd-matrix.json",
     "state.json",
     "session.json",
+    "progress.json",
     "next-interview-prep.json",
     "standard-answers.json",
     "question-clusters.json",
@@ -104,7 +106,49 @@ def write_json(path: Path, value: Any) -> None:
         json.dump(value, handle, ensure_ascii=False, indent=2)
         handle.write("\n")
         temp_name = handle.name
+    os.chmod(temp_name, 0o600)
     os.replace(temp_name, path)
+
+
+def write_private_text(path: Path, value: str) -> None:
+    """原子写入私有文本，并确保新旧目标最终均为 0600。"""
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=path.parent, delete=False
+    ) as handle:
+        handle.write(value)
+        temp_name = handle.name
+    os.chmod(temp_name, 0o600)
+    os.replace(temp_name, path)
+
+
+def append_private_text(path: Path, value: str) -> None:
+    """追加私有日志；不读取或重写已有内容，并将文件权限收紧为 0600。"""
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        data = value.encode("utf-8")
+        while data:
+            written = os.write(descriptor, data)
+            data = data[written:]
+    finally:
+        os.close(descriptor)
+
+
+def open_private_text(path: Path):
+    """以 0600 打开私有文本输出，供子进程日志等流式写入场景使用。"""
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(descriptor, 0o600)
+    return os.fdopen(descriptor, "w", encoding="utf-8")
+
+
+def copy_private_file(source: Path, destination: Path) -> None:
+    """复制私有资料但不继承源文件可能过宽的权限。"""
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    shutil.copyfile(source, destination)
+    destination.chmod(0o600)
 
 
 def safe_component(value: str | None, fallback: str) -> str:

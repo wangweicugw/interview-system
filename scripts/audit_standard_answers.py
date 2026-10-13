@@ -12,7 +12,7 @@ from typing import Any
 
 from check_data_compatibility import require_store_compatible
 from check_standard_answers import validate_standard_answers
-from common import now_iso, write_json
+from common import append_private_text, now_iso, write_json
 
 
 NUMBER_RE = re.compile(r"\d+(?:\.\d+)?\s*(?:%|年|个月|月|人|万|亿|ms|毫秒|秒|分钟|qps|QPS|台|个)?")
@@ -127,22 +127,26 @@ def audit(root: Path, *, reset_confirmed_stale: bool) -> dict[str, Any]:
         changed_at = now_iso()
         log = root / "profile" / "standard-answer-revisions.jsonl"
         os.umask(0o077)
-        with log.open("a", encoding="utf-8") as handle:
-            for answer in answers:
-                answer_id = str(answer.get("answer_id") or "")
-                if answer_id not in stale_answer_ids:
-                    continue
-                answer["status"] = "pending"
-                answer["reviewed_at"] = changed_at
-                handle.write(json.dumps({
+        revisions = []
+        for answer in answers:
+            answer_id = str(answer.get("answer_id") or "")
+            if answer_id not in stale_answer_ids:
+                continue
+            answer["status"] = "pending"
+            answer["reviewed_at"] = changed_at
+            revisions.append({
                     "schema_version": 1,
                     "answer_id": answer_id,
                     "previous_status": "confirmed",
                     "status": "pending",
                     "reason": "高频问法新增了尚未纳入成熟答案的真实回答，需重新复核。",
                     "changed_at": changed_at,
-                }, ensure_ascii=False) + "\n")
-                reset_count += 1
+                })
+            reset_count += 1
+        append_private_text(
+            log,
+            "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in revisions),
+        )
         write_json(answers_path, answers_payload)
         issues = validate_standard_answers(root)
         if issues:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from analysis_state import mark_stale
 from check_data_compatibility import require_store_compatible
-from common import now_iso, read_json, sha256_text, write_json
+from common import append_private_text, now_iso, read_json, sha256_text, write_json
 from profile_store import (
     append_event,
     content_hash,
@@ -113,8 +113,10 @@ def main() -> int:
         "changes": changed,
         "previous_manifest_sha256": sha256_text(json.dumps(before, ensure_ascii=False, sort_keys=True)),
     }
-    with (case_path / "manifest-revisions.jsonl").open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(revision, ensure_ascii=False) + "\n")
+    append_private_text(
+        case_path / "manifest-revisions.jsonl",
+        json.dumps(revision, ensure_ascii=False) + "\n",
+    )
     outcome = record_outcome(case_path, manifest, args.reason, changed)
     print(
         json.dumps(

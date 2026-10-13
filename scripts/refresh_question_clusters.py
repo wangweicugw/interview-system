@@ -13,7 +13,7 @@ from typing import Any
 
 from check_data_compatibility import require_store_compatible
 from check_question_clusters import validate_question_clusters
-from common import now_iso, sha256_text, write_json
+from common import append_private_text, now_iso, sha256_text, write_json
 
 
 def _normalize(value: str) -> str:
@@ -137,9 +137,10 @@ def refresh(root: Path, *, apply_high_confidence: bool) -> dict[str, Any]:
             raise RuntimeError("自动追加后聚类校验失败：" + "；".join(issues))
         os.umask(0o077)
         log = root / "profile" / "question-cluster-revisions.jsonl"
-        with log.open("a", encoding="utf-8") as handle:
-            for revision in revisions:
-                handle.write(json.dumps(revision, ensure_ascii=False) + "\n")
+        append_private_text(
+            log,
+            "".join(json.dumps(revision, ensure_ascii=False) + "\n" for revision in revisions),
+        )
 
     source_digest = sha256_text(json.dumps(catalog, ensure_ascii=False, sort_keys=True))
     report = {

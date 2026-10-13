@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import json
 import os
@@ -25,6 +26,13 @@ from labels_zh import label
 CASE_HTML = "interview-review.html"
 HISTORY_HTML = "interview-history.html"
 QUESTION_BANK_HTML = "interview-question-bank.html"
+SECURITY_META = (
+    '<meta http-equiv="Content-Security-Policy" '
+    'content="default-src \'none\'; style-src \'unsafe-inline\'; script-src \'unsafe-inline\'; '
+    'img-src data:; font-src \'none\'; connect-src \'none\'; media-src \'none\'; '
+    'object-src \'none\'; frame-src \'none\'; base-uri \'none\'; form-action \'none\'">'
+    '<meta name="referrer" content="no-referrer">'
+)
 
 OVERALL_LABELS = {
     "professional": "专业能力",
@@ -76,7 +84,7 @@ def question_topic(question: dict[str, Any]) -> str:
     if any(value in text for value in ("自我介绍", "个人经历", "近期工作", "近年负责")):
         return "self-intro"
     if category in {"motivation", "career", "compensation", "logistics", "role_fit"} or any(
-        value in text for value in ("离职", "职业规划", "薪资", "新机会", "岗位如何理解", "岗位的意愿", "愿意去杭州", "迁往杭州", "为什么考虑 Zoom", "符合预期")
+        value in text for value in ("离职", "职业规划", "薪资", "新机会", "岗位如何理解", "岗位的意愿", "愿意去杭州", "迁往杭州", "为什么考虑目标公司", "符合预期")
     ):
         return "career"
     if category in {"collaboration", "leadership", "organization"} or any(
@@ -132,14 +140,49 @@ def write_text(path: Path, value: str) -> None:
     ) as handle:
         handle.write(value)
         temporary = handle.name
+    os.chmod(temporary, 0o600)
     os.replace(temporary, path)
 
 
 def safe_url(value: str) -> str | None:
+    if any(character in value for character in ("\r", "\n", "\x00")):
+        return None
     parsed = urlparse(value)
-    if parsed.scheme in {"http", "https"} and parsed.netloc:
+    if (
+        parsed.scheme in {"http", "https"}
+        and parsed.hostname
+        and parsed.username is None
+        and parsed.password is None
+    ):
         return value
     return None
+
+
+def archive_id(root: Path) -> str:
+    config = read_json(root / "config.json", {})
+    seed = json.dumps(
+        {
+            "schema_version": config.get("schema_version"),
+            "created_at": config.get("created_at"),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+
+
+def privacy_notice() -> str:
+    return (
+        '<div class="notice"><strong>隐私提醒</strong><p>本页可能包含简历、逐字稿、JD、公司名称和个人分析，'
+        '请勿上传到公开网盘或仓库。页面本身不加载远程资源；点击标记为外部资料的链接会联网。</p></div>'
+    )
+
+
+def external_link(url: str, title: str) -> str:
+    return (
+        f'<a href="{html.escape(url, quote=True)}" target="_blank" rel="noopener">'
+        f'{html.escape(title)} <span class="external-note">↗ 外部资料</span></a>'
+    )
 
 
 def inline_markdown(value: str) -> str:
@@ -451,11 +494,9 @@ def claims_table(claims: dict[str, Any]) -> str:
         sources: list[str] = []
         for source in item.get("sources", []):
             url = safe_url(str(source.get("url", "")))
-            title = html.escape(str(source.get("title") or "来源"))
+            title = str(source.get("title") or "来源")
             if url:
-                sources.append(
-                    f'<a href="{html.escape(url, quote=True)}" target="_blank" rel="noopener">{title}</a>'
-                )
+                sources.append(external_link(url, title))
         evidence = "、".join(str(value) for value in item.get("evidence_segments", []))
         rows.append(
             f'<tr><td><code>{html.escape(str(item.get("claim_id", "")))}</code></td>'
@@ -668,10 +709,7 @@ def render_standard_answer(answer: dict[str, Any], cases: dict[str, dict[str, An
         url = safe_url(str(source.get("url") or ""))
         if not url:
             continue
-        source_links.append(
-            f'<a href="{html.escape(url, quote=True)}" target="_blank" rel="noopener">'
-            f'{html.escape(str(source.get("title") or "官方资料"))}</a>'
-        )
+        source_links.append(external_link(url, str(source.get("title") or "官方资料")))
     sources_html = (
         '<p class="standard-evidence"><strong>技术核验：</strong>' + "、".join(source_links) + '</p>'
         if source_links else ""
@@ -787,7 +825,7 @@ def render_question_clusters(root: Path, cases: list[dict[str, Any]]) -> tuple[s
             '<details class="answer-editor"><summary>修订或确认本组</summary>'
             '<label>分组名称<input data-edit-cluster-label type="text" value="'
             f'{html.escape(label_text, quote=True)}"></label>'
-            '<label>归并说明<textarea data-edit-cluster-note rows="3">{html.escape(note)}</textarea></label>'
+            f'<label>归并说明<textarea data-edit-cluster-note rows="3">{html.escape(note)}</textarea></label>'
             '<label>真实问题引用（JSON 数组）<textarea data-edit-cluster-questions rows="8">'
             f'{html.escape(json.dumps(cluster.get("questions", []), ensure_ascii=False, indent=2))}</textarea></label>'
             f'{review_buttons("question_cluster", cluster_id, status)}</details></article>'
@@ -843,8 +881,8 @@ def answer_view(answer: Any, summary: str) -> str:
             continue
         url = safe_url(str(source.get("url") or ""))
         if url:
-            title = html.escape(str(source.get("title") or "官方来源"))
-            sources.append(f'<a href="{html.escape(url, quote=True)}" target="_blank" rel="noopener">{title}</a>')
+            title = str(source.get("title") or "官方来源")
+            sources.append(external_link(url, title))
     sources_html = f'<p class="answer-sources"><strong>核验资料：</strong>{"、".join(sources)}</p>' if sources else ""
     return (
         f'<details class="reference-answer"><summary>{html.escape(summary)}</summary>'
@@ -943,10 +981,7 @@ def question_card(case: dict[str, Any], entry: dict[str, Any], segments: dict[st
         source_title = str(source.get("title") or "技术核验资料")
         section = str(source.get("section") or "").strip()
         label_text = f"{source_title} · {section}" if section else source_title
-        related_links.append(
-            f'<a href="{html.escape(url, quote=True)}" target="_blank" rel="noopener">'
-            f'{html.escape(label_text)}</a>'
-        )
+        related_links.append(external_link(url, label_text))
     sources_html = (
         '<p class="practice-docs"><strong>相关文档：</strong>' + "、".join(related_links) + '</p>'
         if related_links else
@@ -1202,6 +1237,7 @@ section{scroll-margin-top:72px}
 .cluster-card[hidden]{display:none}.cluster-heading{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.cluster-heading h3{font-size:16px;margin:0}.cluster-frequency{font-size:13px;color:#31577d;font-weight:700;margin:7px 0}
 .cluster-card details{border:0;border-top:1px solid var(--line);border-radius:0;padding:0;margin-top:10px}.cluster-card ul{padding-left:1.2rem}.cluster-card li+li{margin-top:7px}.cluster-card li span{display:block;color:var(--muted);font-size:12px}
 .review-center,.learning-dashboard{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px 28px;margin:0 0 22px}.review-summary{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}.review-summary span{background:#eef2f7;border-radius:999px;padding:5px 10px;font-size:13px}.review-toolbar,.review-actions,.timer-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.review-toolbar{padding:12px;background:#f7f9fc;border-radius:10px}.review-toolbar button,.review-actions button,.practice-recorder button{border:0;border-radius:8px;padding:8px 11px;background:var(--blue);color:#fff;font:inherit;font-size:13px;font-weight:700;cursor:pointer}.review-toolbar .secondary,.review-actions button[data-review-status="pending"]{background:#64748b}.review-actions .danger{background:var(--red)}.review-actions span,.review-toolbar span,.practice-recorder span{font-size:12px;color:var(--muted)}.review-list{display:grid;gap:8px;padding-bottom:12px}.review-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;padding:11px;border-bottom:1px solid var(--line)}.review-row p{margin:3px 0}.review-row small{color:var(--muted)}
+.external-note{font-size:.78em;color:var(--muted);white-space:nowrap}
 .answer-editor label,.practice-recorder label{display:grid;gap:5px;margin:10px 0;font-size:13px;font-weight:700}.answer-editor textarea,.answer-editor input,.practice-recorder textarea,.practice-recorder input,.practice-recorder select{width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:9px;font:inherit;background:#fff}.practice-recorder{background:#f8fbff}.timer-line strong{font-variant-numeric:tabular-nums;font-size:18px}.dashboard-grid{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:18px}.review-queue{padding-left:1.3rem}.review-queue li+li{margin-top:9px}.review-queue span{display:block;color:var(--muted);font-size:12px}.learning-dashboard table{min-width:520px}
 @media(max-width:760px){main{width:min(100% - 18px,1180px);padding-top:10px}.hero{padding:22px;border-radius:16px}.scores{grid-template-columns:repeat(2,minmax(0,1fr))}.review{padding:15px}}
 @media(max-width:760px){.focus-grid,.history-grid,.action-grid,.bank-layout,.standard-versions,.cluster-grid,.dashboard-grid{grid-template-columns:1fr}.review-row{grid-template-columns:1fr}.topnav,.bank-sidebar{position:static}.bank-sidebar{max-height:none}.focus-main{padding:17px}#practice,.topic-group,.cluster-section,.review-center,.learning-dashboard{padding:18px}.topic-heading{display:block}.topic-frequency{white-space:normal}}
@@ -1298,18 +1334,51 @@ SCRIPT = """
     questionInput.addEventListener('input', applyQuestions);
     applyQuestions();
   }
-  const actionKey = 'interview-system-review-actions-v1';
+  const archiveId = document.body.dataset.storeId || 'unknown';
+  const actionKey = `interview-system-review-actions-v2:${archiveId}`;
+  const persistenceKey = `interview-system-review-persistence-v1:${archiveId}`;
+  const legacyActionKey = 'interview-system-review-actions-v1';
+  const ttlMilliseconds = 30 * 24 * 60 * 60 * 1000;
   let queuedActions = [];
-  try { queuedActions = JSON.parse(localStorage.getItem(actionKey) || '[]'); }
-  catch (_) { queuedActions = []; }
+  let persistent = false;
+  try { persistent = localStorage.getItem(persistenceKey) === '1'; }
+  catch (_) { persistent = false; }
+  const readQueue = () => {
+    try {
+      const raw = (persistent ? localStorage : sessionStorage).getItem(actionKey);
+      if (!raw) return [];
+      const payload = JSON.parse(raw);
+      if (Array.isArray(payload)) return payload;
+      if (!payload || !Array.isArray(payload.actions)) return [];
+      if (persistent && Number(payload.expires_at || 0) < Date.now()) {
+        localStorage.removeItem(actionKey); return [];
+      }
+      return payload.actions;
+    } catch (_) { return []; }
+  };
+  queuedActions = readQueue();
   if (!Array.isArray(queuedActions)) queuedActions = [];
+  const persistQueue = () => {
+    const storage = persistent ? localStorage : sessionStorage;
+    const now = Date.now();
+    try {
+      storage.setItem(actionKey, JSON.stringify({
+        saved_at: now,
+        expires_at: persistent ? now + ttlMilliseconds : null,
+        actions: queuedActions,
+      }));
+    } catch (_) {
+      const message = document.querySelector('[data-action-message]');
+      if (message) message.textContent = '浏览器拒绝保存；当前队列只保留在页面内存中';
+    }
+  };
   const actionIdentity = action => action.kind === 'practice_attempt'
     ? `${action.kind}:${action.case_id}:${action.question_id}` : `${action.kind}:${action.id}`;
   const saveQueue = action => {
     const identity = actionIdentity(action);
     queuedActions = queuedActions.filter(item => actionIdentity(item) !== identity);
     queuedActions.push(action);
-    localStorage.setItem(actionKey, JSON.stringify(queuedActions));
+    persistQueue();
     updateQueue();
   };
   const updateQueue = () => {
@@ -1403,6 +1472,7 @@ SCRIPT = """
   if (exportButton) exportButton.addEventListener('click', () => {
     const message = document.querySelector('[data-action-message]');
     if (!queuedActions.length) { if (message) message.textContent = '当前没有待导出操作'; return; }
+    if (!window.confirm('导出 JSON 可能包含个人练习回答和修订内容。请将其保存在受控本地位置。继续导出？')) return;
     const payload = {schema_version: 1, generated_at: new Date().toISOString(), actions: queuedActions};
     const blob = new Blob([JSON.stringify(payload, null, 2) + '\n'], {type: 'application/json'});
     const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
@@ -1412,9 +1482,38 @@ SCRIPT = """
   });
   const clearButton = document.querySelector('[data-clear-actions]');
   if (clearButton) clearButton.addEventListener('click', () => {
-    queuedActions = []; localStorage.removeItem(actionKey); updateQueue();
-    const message = document.querySelector('[data-action-message]'); if (message) message.textContent = '队列已清空';
+    queuedActions = [];
+    try {
+      sessionStorage.removeItem(actionKey);
+      localStorage.removeItem(actionKey);
+      localStorage.removeItem(persistenceKey);
+      localStorage.removeItem(legacyActionKey);
+    } catch (_) {}
+    persistent = false;
+    const toggle = document.querySelector('[data-persist-actions]');
+    if (toggle) toggle.checked = false;
+    updateQueue();
+    const message = document.querySelector('[data-action-message]');
+    if (message) message.textContent = '当前档案队列和旧版本地队列已清空';
   });
+  const persistenceToggle = document.querySelector('[data-persist-actions]');
+  if (persistenceToggle) {
+    persistenceToggle.checked = persistent;
+    persistenceToggle.addEventListener('change', () => {
+      const previous = persistent ? localStorage : sessionStorage;
+      persistent = persistenceToggle.checked;
+      try {
+        previous.removeItem(actionKey);
+        if (persistent) localStorage.setItem(persistenceKey, '1');
+        else localStorage.removeItem(persistenceKey);
+      } catch (_) {}
+      persistQueue();
+      const message = document.querySelector('[data-action-message]');
+      if (message) message.textContent = persistent
+        ? '已选择本机持久保存，队列最长保留 30 天'
+        : '已改为仅当前浏览器会话保存';
+    });
+  }
   updateQueue();
 })();
 """
@@ -1427,7 +1526,7 @@ def render_history_section(cases: list[dict[str, Any]], current: str | None, fro
   <h2>{"其他场次" if from_case else "逐场查看"}</h2>
   <p class="muted">每场先显示一条已保存的下一步；打开后可查看 JD、技术核验和逐字稿。</p>
   <label for="history-search">搜索公司、岗位、技术或待办</label>
-  <div class="search-line"><input id="history-search" class="search" data-history-search type="search" placeholder="例如 MySQL、OPay、管控平台"><span data-history-count></span></div>
+  <div class="search-line"><input id="history-search" class="search" data-history-search type="search" placeholder="例如 MySQL、示例项目、管控平台"><span data-history-count></span></div>
   <div class="history-grid">{rows}</div>
   <div class="empty" data-history-empty>没有匹配的历史面试。</div>
 </section>"""
@@ -1470,7 +1569,9 @@ def render_review_center(root: Path) -> str:
         f'<span>成熟答案 {len(pending_answers)}</span><span>高频问法 {len(pending_clusters)}</span><span>长期档案 {len(pending_events)}</span>'
         '<span data-action-count>待导出 0 项</span></div>'
         '<div class="review-toolbar"><button type="button" data-export-actions>导出操作 JSON</button>'
-        '<button type="button" class="secondary" data-clear-actions>清空本机队列</button><span data-action-message></span></div>'
+        '<button type="button" class="secondary" data-clear-actions>清空本机队列</button>'
+        '<label><input type="checkbox" data-persist-actions> 在本机持久保存 30 天</label>'
+        '<span data-action-message></span></div>'
         + (f'<details><summary>处理 {len(pending_events)} 条长期档案事实</summary><div class="review-list">{"".join(event_rows)}</div></details>' if event_rows else '<p>长期档案暂无待确认项。</p>')
         + '<p class="muted">成熟答案和高频问法可在各自卡片中直接修订或确认。</p></section>'
     )
@@ -1522,6 +1623,7 @@ def render_learning_dashboard(root: Path) -> str:
 
 def render_case(case: dict[str, Any], cases: list[dict[str, Any]]) -> str:
     case_path: Path = case["path"]
+    root = case_path.parents[1]
     manifest = read_json(case_path / "manifest.json", {})
     scores = read_json(case_path / "scores.json", {})
     claims = read_json(case_path / "claims.json", {})
@@ -1544,12 +1646,13 @@ def render_case(case: dict[str, Any], cases: list[dict[str, Any]]) -> str:
     )
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(case['company'])} · {html.escape(case['role'])} · 面试复盘</title><style>{STYLE}</style></head>
-<body data-interview-case="{html.escape(case['case_id'], quote=True)}"><main>
+{SECURITY_META}<title>{html.escape(case['company'])} · {html.escape(case['role'])} · 面试复盘</title><style>{STYLE}</style></head>
+<body data-interview-case="{html.escape(case['case_id'], quote=True)}" data-store-id="{archive_id(root)}"><main>
 <nav class="topnav" aria-label="本页导航"><a href="../../{HISTORY_HTML}">历史总览</a><a href="../../{QUESTION_BANK_HTML}">面试题库</a><a href="#focus">下一步</a><a href="#practice">本场练习题</a><a href="#review">完整复盘</a><a href="#jd">岗位 JD</a><a href="#claims">技术核验</a><a href="#evidence">逐字稿</a></nav>
 <header class="hero"><div class="eyebrow">Interview System · Offline Review</div>
 <h1>{html.escape(case['company'])}<br>{html.escape(case['role'])}</h1>
 <p>{html.escape(case['datetime'])}</p><div class="meta">{meta}</div></header>
+{privacy_notice()}
 {warning_block}
 {review_focus(review)}
 {render_case_practice(case)}
@@ -1567,10 +1670,11 @@ def render_case(case: dict[str, Any], cases: list[dict[str, Any]]) -> str:
 def render_history_index(root: Path, cases: list[dict[str, Any]]) -> str:
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>面试历史总览</title><style>{STYLE}</style></head><body data-interview-history><main>
+{SECURITY_META}<title>面试历史总览</title><style>{STYLE}</style></head><body data-interview-history data-store-id="{archive_id(root)}"><main>
 <header class="hero"><div class="eyebrow">Interview System · Local Archive</div><h1>面试历史总览</h1>
 <p>先看待办，再按场次查证据。共 {len(cases)} 场；只展示本地档案。</p>
 <p><a class="primary-link" href="{QUESTION_BANK_HTML}">打开完整面试题库 →</a></p></header>
+{privacy_notice()}
 {render_plan_summary(root)}
 {render_history_practice(root, cases)}
 {cross_case_report_link(root)}
@@ -1650,10 +1754,11 @@ def render_question_bank(root: Path, cases: list[dict[str, Any]]) -> str:
     total_questions = sum(len(values) for values in grouped.values())
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>面试题库</title><style>{STYLE}</style></head><body data-interview-question-bank><main>
+{SECURITY_META}<title>面试题库</title><style>{STYLE}</style></head><body data-interview-question-bank data-store-id="{archive_id(root)}"><main>
 <nav class="topnav" aria-label="本页导航"><a href="{HISTORY_HTML}">历史总览</a><a href="#review-center">确认中心</a><a href="#learning-dashboard">练习计划</a><a href="#question-bank">全部题目</a></nav>
 <header class="hero"><div class="eyebrow">Interview System · Question Bank</div><h1>面试题库</h1>
 <p>共 {total_questions} 道真实面试题，来自 {len(cases)} 场；{cluster_count} 组跨场高频问法，{standard_answer_count} 份跨场成熟答案，{answer_count} 道已有推荐答案，{source_count} 道绑定了技术核验资料。</p></header>
+{privacy_notice()}
 <div id="question-bank" class="bank-layout">
 <aside class="bank-sidebar"><h2>搜索与书签</h2>
 <div class="search-line"><label for="question-search">搜索全部题目</label><input id="question-search" class="search" data-question-search type="search" placeholder="问题、公司、岗位、回答或诊断"><span data-question-count></span></div>

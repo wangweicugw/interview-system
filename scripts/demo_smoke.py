@@ -11,6 +11,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from common import write_json, write_private_text
+
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
 FIXTURE = SKILL_DIR / "assets" / "demo-case.json"
@@ -70,10 +72,8 @@ def run_demo(root_argument: Path) -> dict[str, Any]:
         for filename, payload in fixture["analysis"].items():
             artifact = dict(payload)
             artifact["case_id"] = imported["case_id"]
-            (case_path / filename).write_text(
-                json.dumps(artifact, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-            )
-        (case_path / "review.md").write_text(fixture["review"], encoding="utf-8")
+            write_json(case_path / filename, artifact)
+        write_private_text(case_path / "review.md", fixture["review"])
         run_script("validate_case.py", "--case", str(case_path), "--stage", "analysis")
         run_script("record_profile_patch.py", "--root", str(root), "--case", str(case_path))
         run_script("render_interview_html.py", "--root", str(root), "--all")

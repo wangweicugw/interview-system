@@ -232,4 +232,20 @@ PDF 输入的逐页提取方法记录在 `manifest.inputs.transcript_pdf_pages` 
 
 ## 算法陪练
 
-`algorithms/sessions/<session_id>/session.json` 保存题目、开始时间、语言（`python` 或 `java`）、已使用提示层级和用户解答路径；旧会话缺少语言时按 `python` 读取。`attempts.jsonl` 追加每次提交的源码哈希、用例结果、语言、运行方式（`docker` 或显式信任的 `local`）、解释和 `human_review_status=pending`。解答快照位于 `algorithms/private/`。测试通过不自动确认为能力掌握；长期档案的 `algorithm_weakness` 事件仍需人工复核。
+`algorithms/sessions/<session_id>/session.json` 保存题目、开始时间、语言（`python` 或 `java`）、已使用提示层级和用户解答路径；旧会话缺少语言时按 `python` 读取。`attempts.jsonl` 追加每次提交的源码哈希、真实用例结果、语言、运行方式、解释、静态检查结果和 `human_review_status=pending`。解答快照位于 `algorithms/private/`。
+
+`algorithms/progress.json` 是 schema v1 原子写入快照：
+
+- `preferences`：默认语言、每日分钟数和当前难度。
+- `current_session`：当前 `session_id`、`problem_id`、教学阶段、语言和 `pending_action`；用于跨会话恢复。
+- `problems.<problem_id>`：`stage`、`mastery`、`hint_level`、`answer_revealed`、练习次数、独立通过次数、最近练习时间、`next_review_date`、错误分类、概念、会话 ID 和 `source_links`。
+
+`stage` 取 `understanding`、`independent_thinking`、`optimization`、`independent_coding`、`code_review`、`interviewer_followup`、`completed`。`mastery` 取 `not_started`、`in_progress`、`concept_understood`、`assisted`、`independent_passed`、`transferable`。只有真实用例全部通过且未使用提示或完整答案，才可写 `independent_passed`；在同一 `topic_key` 下又独立通过另一题，当前题才可写 `transferable`。
+
+`source_links` 只保存 `case_id`、`question_id`、`knowledge_key` 和可选的相对 `source_path`。算法进度与长期档案通过稳定事件 ID `algorithm:<problem_id>` 和同一组来源标识关联，不复制逐字稿。测试通过不自动确认长期能力；`algorithm_weakness` 仍需人工复核。
+
+`algorithms/plans/week-YYYY-MM-DD.json` 保存动态计划的输入指标、调整原因、薄弱专题权重和每日任务。它是可重建的建议快照，不是日程提醒。
+
+`algorithms/sessions/<session_id>/oral-feedback.jsonl` 追加口述反馈记录，包括本地私有快照路径、哈希、`method=keyword_heuristic`、`actual_audio_transcribed=false`、`semantic_correctness_verified=false`、覆盖项和缺项。全文只保存在 `algorithms/private/<session_id>/`。
+
+错题摘要、周报和冲刺清单为用户指定位置的 Markdown 派生产物，不反向覆盖 `progress.json`、历史面试或长期档案。
