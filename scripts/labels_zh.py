@@ -33,11 +33,11 @@ LABELS = {
         "unknown": "未确认",
     },
     "profile_type": {
-        "answer_version": "答案版本",
-        "knowledge_state": "知识状态",
-        "interview_pattern": "面试模式",
-        "algorithm_weakness": "算法弱项",
-        "resume_risk": "简历风险",
+        "answer_version": "回答需要改进",
+        "knowledge_state": "知识点掌握情况",
+        "interview_pattern": "面试追问规律",
+        "algorithm_weakness": "算法练习提醒",
+        "resume_risk": "简历表述提醒",
     },
 }
 

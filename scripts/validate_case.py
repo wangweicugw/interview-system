@@ -559,6 +559,7 @@ def main() -> int:
         case_html = case_path / "interview-review.html"
         history_html = case_path.parent.parent / "interview-history.html"
         question_bank_html = case_path.parent.parent / "interview-question-bank.html"
+        pending_review_html = case_path.parent.parent / "interview-pending-review.html"
         if not case_html.is_file() or not case_html.read_text(encoding="utf-8").strip():
             errors.append("interview-review.html 缺失或为空")
         else:
@@ -570,16 +571,23 @@ def main() -> int:
             errors.append("根目录 interview-history.html 缺失或为空")
         else:
             document = history_html.read_text(encoding="utf-8")
-            for marker in ("data-interview-history", 'id="history"'):
+            for marker in ("data-interview-history", 'id="history"', 'id="question-bank"', "我的现场回答", "推荐答案"):
                 if marker not in document:
                     errors.append(f"interview-history.html 缺少标记：{marker}")
         if not question_bank_html.is_file() or not question_bank_html.read_text(encoding="utf-8").strip():
             errors.append("根目录 interview-question-bank.html 缺失或为空")
         else:
             document = question_bank_html.read_text(encoding="utf-8")
-            for marker in ("data-interview-question-bank", 'id="question-bank"', "我的现场回答", "推荐答案"):
+            for marker in ("data-interview-question-bank", "题库已并入面试总览", 'href="interview-history.html#question-bank"'):
                 if marker not in document:
                     errors.append(f"interview-question-bank.html 缺少标记：{marker}")
+        if not pending_review_html.is_file() or not pending_review_html.read_text(encoding="utf-8").strip():
+            errors.append("根目录 interview-pending-review.html 缺失或为空")
+        else:
+            document = pending_review_html.read_text(encoding="utf-8")
+            for marker in ("data-interview-pending-review", 'id="review-center"', "导出待处理结果"):
+                if marker not in document:
+                    errors.append(f"interview-pending-review.html 缺少标记：{marker}")
 
     status = "valid" if not errors else "invalid"
     if status == "valid" and args.stage in {"analysis", "presentation"}:

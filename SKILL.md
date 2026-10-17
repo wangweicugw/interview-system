@@ -19,8 +19,9 @@ description: 复盘真实面试并维护个人长期面试档案，也支持把�
 - 导入或复盘面试：执行“文稿闭环”。先读 [references/workflow.md](references/workflow.md)、[references/scoring.md](references/scoring.md) 和 [references/html-presentation.md](references/html-presentation.md)；技术题再读 [references/fact-checking.md](references/fact-checking.md)。
 - 用户询问数据是否离线、是否会上传、要求 `local-only` / `cloud-assisted` 或要处理真实敏感资料：读 [references/privacy-and-security.md](references/privacy-and-security.md)。
 - 更新面试结果、修订逐字稿或补充资料：读 [references/workflow.md](references/workflow.md) 的修订与事件规则，并按 [references/html-presentation.md](references/html-presentation.md) 重建全部 HTML。
-- 查看长期档案、按真实面试问题练习或准备下一场：读 [references/profile-and-prep.md](references/profile-and-prep.md) 和 [references/html-presentation.md](references/html-presentation.md)；现有面试的统一入口是数据目录下的 `interview-history.html`，全量题库入口是 `interview-question-bank.html`，单场页“用本场问题练习”可追溯提问与回答原文。
+- 查看长期档案、按真实面试问题练习或准备下一场：读 [references/profile-and-prep.md](references/profile-and-prep.md) 和 [references/html-presentation.md](references/html-presentation.md)；现有面试的统一入口是数据目录下的 `interview-history.html`，其中包含历史场次、练习计划和全量题库；`interview-question-bank.html` 仅作为旧链接兼容入口，人工审核入口是 `interview-pending-review.html`。审核页默认只要求确认最多 5 组最高频问题是否被正确归为同一类；成熟答案、能力判断和风险记录必须说明含义并默认折叠，不应制造一次清空全部 pending 的压力。单场页“用本场问题练习”可追溯提问与回答原文。
 - 用户从题库页面导出确认、修订或练习操作：运行 `apply_review_actions.py --root <data-root> --actions <导出的JSON>`，再运行 `audit_standard_answers.py --reset-confirmed-stale`、`build_review_plan.py` 和全量 HTML 重建。导出文件只是待应用操作，未通过旧状态和全量引用预校验前不得宣称已经写入。成熟答案和高频分组的文本修订要在私有修订日志中保留完整的修改前后快照。
+- 用户在同一台电脑上说“应用刚导出的审核结果”时，从其下载目录中查找最新的 `interview-review-actions-*.json`，核对修改时间和结构后按上一条流程应用；无需用户再次上传。没有匹配文件或同时存在多个无法可靠区分的新文件时停止并说明，不猜测目标。
 - 用户要求根据多次回答整理自我介绍、架构介绍等高频题标准答案：读 [references/profile-and-prep.md](references/profile-and-prep.md)、[references/schemas.md](references/schemas.md) 和 [references/html-presentation.md](references/html-presentation.md)。先把语义相同或面试意图相近的问题引用保存到私有 `profile/question-clusters.json`，不能把整个主题频率冒充同一道题的频率；再汇总对应现场回答，消除重复和冲突，把 30 秒版、2 分钟版、常见追问、待补证据和来源引用保存到 `profile/standard-answers.json`。若原条目混合了多个项目或不同面试意图，用 `split_curated_entries.py --root <data-root> --spec <拆分JSON>` 将原条目标记为 `rejected`并建立新的 `pending` 条目；拆分规格必须对原问题引用做无遗漏、无重复的完整分区。技术题另读 [references/fact-checking.md](references/fact-checking.md) 并优先绑定官方资料。运行 `check_question_clusters.py`、`check_standard_answers.py` 后重建全部 HTML。未经用户确认保持 `pending`；只有用户明确确认具体版本时，才运行 `set_standard_answer_status.py` 追加修订并改为 `confirmed`。
 - 新增面试后运行 `refresh_question_clusters.py` 生成未归并题目的候选报告；只有显式使用 `--apply-high-confidence` 才把高置信候选追加到现有组，且相关组一律回到 `pending`。随后运行 `audit_standard_answers.py --reset-confirmed-stale`，用新增现场回答和数字差异线索修订成熟答案；相似度和数字差异都只是复核线索。
 - 用户要求练习题参考答案：先明确是重点题及延伸追问，还是全部历史题；按 [references/fact-checking.md](references/fact-checking.md) 核验技术结论，给每道要求覆盖的题目单独保存参考答案。答案不能冒充候选人当场回答或真实项目成果；Java 算法答案要编译并运行边界测试。按 [references/html-presentation.md](references/html-presentation.md) 重建页面，再用 `check_practice_answers.py` 校验覆盖范围。
@@ -104,7 +105,7 @@ description: 复盘真实面试并维护个人长期面试档案，也支持把�
    <python> <skill-dir>/scripts/validate_case.py --case <case_path> --stage presentation
    ```
 
-9. 对话中只给结论摘要、最高风险、行动项和待确认项；优先链接当前场 `interview-review.html`、根目录 `interview-history.html` 和 `interview-question-bank.html`。
+9. 对话中只给结论摘要、最高风险、行动项和待确认项；优先链接当前场 `interview-review.html`、根目录 `interview-history.html` 和 `interview-pending-review.html`；旧题库文件仅在用户访问旧链接时作为兼容入口提供。
 
 准备下一场时，可从最近一场含 JD 矩阵的场次生成确定性简报：
 

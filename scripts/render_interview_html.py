@@ -26,6 +26,8 @@ from labels_zh import label
 CASE_HTML = "interview-review.html"
 HISTORY_HTML = "interview-history.html"
 QUESTION_BANK_HTML = "interview-question-bank.html"
+PENDING_REVIEW_HTML = "interview-pending-review.html"
+PRIORITY_REVIEW_LIMIT = 5
 SECURITY_META = (
     '<meta http-equiv="Content-Security-Policy" '
     'content="default-src \'none\'; style-src \'unsafe-inline\'; script-src \'unsafe-inline\'; '
@@ -649,14 +651,20 @@ def review_buttons(kind: str, item_id: str, status: str) -> str:
     return (
         f'<div class="review-actions" data-review-item data-review-kind="{html.escape(kind, quote=True)}" '
         f'data-review-id="{html.escape(item_id, quote=True)}" data-review-current="{html.escape(status, quote=True)}">'
-        '<button type="button" data-review-status="confirmed">确认</button>'
-        '<button type="button" data-review-status="pending">保持待确认</button>'
-        '<button type="button" class="danger" data-review-status="rejected">驳回</button>'
-        '<span data-review-result></span></div>'
+        '<button type="button" aria-pressed="false" data-review-status="confirmed">确认正确</button>'
+        '<button type="button" aria-pressed="false" data-review-status="pending">暂不确定</button>'
+        '<button type="button" aria-pressed="false" class="danger" data-review-status="rejected">不应采用</button>'
+        '<button type="button" class="undo" data-review-undo hidden>撤销选择</button>'
+        '<span data-review-result>尚未选择；导出并应用后才会生效</span></div>'
     )
 
 
-def render_standard_answer(answer: dict[str, Any], cases: dict[str, dict[str, Any]]) -> str:
+def render_standard_answer(
+    answer: dict[str, Any],
+    cases: dict[str, dict[str, Any]],
+    *,
+    editable: bool = False,
+) -> str:
     """Render one cross-case answer while preserving evidence and review state."""
     title = str(answer.get("title") or "成熟答案").strip()
     status = str(answer.get("status") or "pending")
@@ -714,10 +722,14 @@ def render_standard_answer(answer: dict[str, Any], cases: dict[str, dict[str, An
         '<p class="standard-evidence"><strong>技术核验：</strong>' + "、".join(source_links) + '</p>'
         if source_links else ""
     )
-    review_html = (
-        '<p class="standard-review"><strong>确认方式：</strong>核对答案和待补证据后，告诉系统“确认该成熟答案”或直接指出修改项；状态变更会追加修订记录。</p>'
-        if status == "pending" else '<p class="standard-review confirmed"><strong>状态：</strong>该版本已由用户确认；后续修改仍须追加修订。</p>'
-    )
+    if status == "pending":
+        review_html = (
+            '<p class="standard-review"><strong>请审核：</strong>核对答案和待补证据，再选择处理结果。</p>'
+            if editable else
+            f'<p class="standard-review"><strong>状态：</strong>待确认。<a href="{PENDING_REVIEW_HTML}">前往待确认页面 →</a></p>'
+        )
+    else:
+        review_html = '<p class="standard-review confirmed"><strong>状态：</strong>该版本已由用户确认；后续修改仍须追加修订。</p>'
     answer_id = str(answer.get("answer_id") or "")
     editor_html = (
         '<details class="answer-editor"><summary>修订或确认这份答案</summary>'
@@ -729,16 +741,17 @@ def render_standard_answer(answer: dict[str, Any], cases: dict[str, dict[str, An
         f'{html.escape(short_answer)}</textarea></label>'
         '<label>2 分钟版<textarea data-edit-standard rows="10">'
         f'{html.escape(standard_answer)}</textarea></label>'
-        '<label>常见追问（JSON 数组）<textarea data-edit-followups rows="8">'
-        f'{html.escape(json.dumps(followups, ensure_ascii=False, indent=2))}</textarea></label>'
         '<label>待补证据（每行一项）<textarea data-edit-limitations rows="4">'
         f'{html.escape(chr(10).join(limitations))}</textarea></label>'
+        '<details class="technical-details"><summary>高级设置（JSON，一般不用修改）</summary>'
+        '<label>常见追问<textarea data-edit-followups rows="8">'
+        f'{html.escape(json.dumps(followups, ensure_ascii=False, indent=2))}</textarea></label>'
         '<label>技术资料（JSON 数组）<textarea data-edit-sources rows="6">'
         f'{html.escape(json.dumps(answer.get("sources", []), ensure_ascii=False, indent=2))}</textarea></label>'
         '<label>回答依据（JSON 数组）<textarea data-edit-source-questions rows="6">'
-        f'{html.escape(json.dumps(answer.get("source_questions", []), ensure_ascii=False, indent=2))}</textarea></label>'
+        f'{html.escape(json.dumps(answer.get("source_questions", []), ensure_ascii=False, indent=2))}</textarea></label></details>'
         f'{review_buttons("standard_answer", answer_id, status)}</details>'
-    )
+    ) if editable else ""
     search = " ".join([
         title, basis, short_answer, standard_answer,
         " ".join(str(item.get("question") or "") + " " + str(item.get("answer") or "")
@@ -759,7 +772,18 @@ def render_standard_answer(answer: dict[str, Any], cases: dict[str, dict[str, An
     )
 
 
-def render_question_clusters(root: Path, cases: list[dict[str, Any]]) -> tuple[str, str, int]:
+def render_question_clusters(
+    root: Path,
+    cases: list[dict[str, Any]],
+    *,
+    editable: bool = False,
+    status_filter: set[str] | None = None,
+    cluster_ids: set[str] | None = None,
+    section_id: str = "frequent-questions",
+    section_title: str = "高频重复问法",
+    section_intro: str | None = None,
+    question_page: str = "",
+) -> tuple[str, str, int]:
     payload = read_json(root / "profile" / "question-clusters.json", {})
     clusters = payload.get("clusters", []) if isinstance(payload, dict) else []
     if not isinstance(clusters, list):
@@ -773,6 +797,11 @@ def render_question_clusters(root: Path, cases: list[dict[str, Any]]) -> tuple[s
     rendered = []
     for cluster in clusters:
         if not isinstance(cluster, dict) or cluster.get("status") == "rejected":
+            continue
+        cluster_id = str(cluster.get("cluster_id") or "")
+        if cluster_ids is not None and cluster_id not in cluster_ids:
+            continue
+        if status_filter is not None and str(cluster.get("status") or "pending") not in status_filter:
             continue
         refs = cluster.get("questions", [])
         refs = refs if isinstance(refs, list) else []
@@ -807,14 +836,26 @@ def render_question_clusters(root: Path, cases: list[dict[str, Any]]) -> tuple[s
         links = []
         for case, qid, question in refs:
             anchor = f'practice-{case["case_id"]}-{qid}'
+            href = f'{question_page}#{anchor}' if question_page else f'#{anchor}'
             links.append(
-                f'<li><a href="#{html.escape(anchor, quote=True)}">{html.escape(question)}</a>'
+                f'<li><a href="{html.escape(href, quote=True)}">{html.escape(question)}</a>'
                 f'<span>{html.escape(str(case["company"]))}</span></li>'
             )
         note = str(cluster.get("note") or "").strip()
         note_html = f'<p class="muted">{html.escape(note)}</p>' if note else ""
         search = " ".join([label_text, note] + [question for _, _, question in refs]).lower()
         card_id = f'cluster-{cluster_id}'
+        editor_html = (
+            '<details class="answer-editor"><summary>确认这些问题是否属于同一类</summary>'
+            '<p class="muted">判断标准：这些原题是否在问同一个核心问题。是就选“确认正确”；分组明显不合理就选“不应采用”；拿不准就选“暂不确定”。</p>'
+            '<label>这组问题的名称<input data-edit-cluster-label type="text" value="'
+            f'{html.escape(label_text, quote=True)}"></label>'
+            f'<label>为什么归为一组（可选）<textarea data-edit-cluster-note rows="3">{html.escape(note)}</textarea></label>'
+            f'<details class="technical-details"><summary>高级设置：{len(refs)} 道问题的原始引用（一般不用修改）</summary>'
+            '<label>真实问题引用（JSON）<textarea data-edit-cluster-questions rows="8">'
+            f'{html.escape(json.dumps(cluster.get("questions", []), ensure_ascii=False, indent=2))}</textarea></label></details>'
+            f'{review_buttons("question_cluster", cluster_id, status)}</details>'
+        ) if editable else ""
         cards.append(
             f'<article class="cluster-card" id="{html.escape(card_id, quote=True)}" data-question-cluster '
             f'data-search="{html.escape(search, quote=True)}"><div class="cluster-heading">'
@@ -822,13 +863,7 @@ def render_question_clusters(root: Path, cases: list[dict[str, Any]]) -> tuple[s
             f'{"已确认" if status == "confirmed" else "AI 归并 · 待确认"}</span></div>'
             f'<p class="cluster-frequency">覆盖 {case_count} 场 · {len(refs)} 道真实问题</p>{note_html}'
             f'<details><summary>查看归入本组的问题</summary><ul>{"".join(links)}</ul></details>'
-            '<details class="answer-editor"><summary>修订或确认本组</summary>'
-            '<label>分组名称<input data-edit-cluster-label type="text" value="'
-            f'{html.escape(label_text, quote=True)}"></label>'
-            f'<label>归并说明<textarea data-edit-cluster-note rows="3">{html.escape(note)}</textarea></label>'
-            '<label>真实问题引用（JSON 数组）<textarea data-edit-cluster-questions rows="8">'
-            f'{html.escape(json.dumps(cluster.get("questions", []), ensure_ascii=False, indent=2))}</textarea></label>'
-            f'{review_buttons("question_cluster", cluster_id, status)}</details></article>'
+            f'{editor_html}</article>'
         )
         bookmarks.append(
             f'<a class="bookmark" data-cluster-bookmark="{html.escape(card_id, quote=True)}" href="#{html.escape(card_id, quote=True)}">'
@@ -836,10 +871,11 @@ def render_question_clusters(root: Path, cases: list[dict[str, Any]]) -> tuple[s
         )
     if not cards:
         return "", "", 0
+    intro = section_intro or "这里统计语义相同或面试意图相近的真实问题，不再把整个主题都视为同一道题。待确认分组属于 AI 判断，可继续拆分或合并。"
     section = (
-        '<section class="cluster-section" id="frequent-questions" data-cluster-section>'
-        '<div class="topic-heading"><h2>高频重复问法</h2><span class="topic-frequency">按跨场语义归并排序</span></div>'
-        '<p class="muted">这里统计语义相同或面试意图相近的真实问题，不再把整个主题都视为同一道题。待确认分组属于 AI 判断，可继续拆分或合并。</p>'
+        f'<section class="cluster-section" id="{html.escape(section_id, quote=True)}" data-cluster-section>'
+        f'<div class="topic-heading"><h2>{html.escape(section_title)}</h2><span class="topic-frequency">按跨场语义归并排序</span></div>'
+        f'<p class="muted">{html.escape(intro)}</p>'
         f'<div class="cluster-grid">{"".join(cards)}</div></section>'
     )
     return section, "".join(bookmarks), len(cards)
@@ -1065,7 +1101,7 @@ def render_case_practice(case: dict[str, Any]) -> str:
     first = "".join(render_item(item) for item in items[:3])
     rest = "".join(render_item(item) for item in items[3:])
     more = f'<details><summary>查看本场其余 {len(items)-3} 道题</summary><div class="practice-grid">{rest}</div></details>' if rest else ""
-    return f'''<section id="practice"><h2>用本场问题练习</h2>
+    return f'''<section id="practice" class="case-section practice-section"><div class="section-heading"><div><span class="section-kicker">练习重点</span><h2>用本场问题练习</h2></div><span class="section-note">先练评分较低的题</span></div>
 <p class="muted">先显示本场技术与编码题中复盘评分较低的题目；评分是既有 AI 复盘判断，只用于定位练习，不跨岗位比较。题目可能经过归纳，请以逐字稿为准。</p>
 <div class="practice-grid">{first}</div>{more}</section>'''
 
@@ -1236,12 +1272,70 @@ section{scroll-margin-top:72px}
 .cluster-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px}.cluster-card{border:1px solid var(--line);border-radius:12px;padding:15px;scroll-margin-top:78px}
 .cluster-card[hidden]{display:none}.cluster-heading{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.cluster-heading h3{font-size:16px;margin:0}.cluster-frequency{font-size:13px;color:#31577d;font-weight:700;margin:7px 0}
 .cluster-card details{border:0;border-top:1px solid var(--line);border-radius:0;padding:0;margin-top:10px}.cluster-card ul{padding-left:1.2rem}.cluster-card li+li{margin-top:7px}.cluster-card li span{display:block;color:var(--muted);font-size:12px}
-.review-center,.learning-dashboard{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px 28px;margin:0 0 22px}.review-summary{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}.review-summary span{background:#eef2f7;border-radius:999px;padding:5px 10px;font-size:13px}.review-toolbar,.review-actions,.timer-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.review-toolbar{padding:12px;background:#f7f9fc;border-radius:10px}.review-toolbar button,.review-actions button,.practice-recorder button{border:0;border-radius:8px;padding:8px 11px;background:var(--blue);color:#fff;font:inherit;font-size:13px;font-weight:700;cursor:pointer}.review-toolbar .secondary,.review-actions button[data-review-status="pending"]{background:#64748b}.review-actions .danger{background:var(--red)}.review-actions span,.review-toolbar span,.practice-recorder span{font-size:12px;color:var(--muted)}.review-list{display:grid;gap:8px;padding-bottom:12px}.review-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;padding:11px;border-bottom:1px solid var(--line)}.review-row p{margin:3px 0}.review-row small{color:var(--muted)}
+.review-center,.learning-dashboard,.pending-group{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px 28px;margin:0 0 22px}.review-entry{display:flex;align-items:center;justify-content:space-between;gap:18px;background:#eef4ff;border:1px solid #c9daf0;border-radius:14px;padding:17px 20px;margin:0 0 22px}.review-entry h2,.review-entry p{margin:0}.review-entry p{margin-top:4px}.review-entry .primary-link{white-space:nowrap}.review-summary{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}.review-summary span{background:#eef2f7;border-radius:999px;padding:5px 10px;font-size:13px}.review-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;list-style:none;padding:0;margin:14px 0}.review-steps li{padding:11px 13px;background:#f7f9fc;border:1px solid var(--line);border-radius:10px}.review-steps strong,.review-steps span{display:block}.review-steps strong{font-size:13px;color:#1f4770}.review-steps span{margin-top:3px;font-size:12px;color:var(--muted)}.review-toolbar,.review-actions,.timer-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.review-toolbar{padding:12px;background:#f7f9fc;border-radius:10px}.review-toolbar button,.review-actions button,.practice-recorder button{border:0;border-radius:8px;padding:8px 11px;background:var(--blue);color:#fff;font:inherit;font-size:13px;font-weight:700;cursor:pointer}.review-toolbar .secondary,.review-actions button[data-review-status="pending"]{background:#64748b}.review-actions .danger{background:var(--red)}.review-actions .undo{background:#fff;color:#475569;border:1px solid #cbd5e1}.review-actions button[aria-pressed="true"]{box-shadow:0 0 0 3px #bfdbfe;transform:translateY(-1px)}.review-actions button[aria-pressed="true"]::before{content:"✓ "}.review-actions [hidden]{display:none}.review-actions [data-review-result]{flex-basis:100%;padding:7px 9px;border-radius:7px;background:#f8fafc}.review-actions [data-review-result].selected{color:#176448;background:#e7f8f0;font-weight:700}.review-actions span,.review-toolbar span,.practice-recorder span{font-size:12px;color:var(--muted)}.review-list{display:grid;gap:8px;padding-bottom:12px}.review-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;padding:11px;border-bottom:1px solid var(--line)}.review-row p{margin:3px 0}.review-row small{color:var(--muted)}.review-evidence{margin:8px 0;padding:8px 10px;background:#f8fafc;border-left:3px solid #cbd5e1;border-radius:6px}.review-evidence p{margin:4px 0}.pending-backlog{background:#f8fafc;border:1px solid var(--line);border-radius:14px;padding:0;margin:0 0 22px}.pending-backlog>summary{cursor:pointer;padding:17px 20px;font-weight:800;color:#334155}.pending-backlog[open]>summary{border-bottom:1px solid var(--line)}.pending-backlog>.pending-group{margin:18px;border-radius:12px}.priority-note{margin:-8px 0 16px;color:#475569}
 .external-note{font-size:.78em;color:var(--muted);white-space:nowrap}
-.answer-editor label,.practice-recorder label{display:grid;gap:5px;margin:10px 0;font-size:13px;font-weight:700}.answer-editor textarea,.answer-editor input,.practice-recorder textarea,.practice-recorder input,.practice-recorder select{width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:9px;font:inherit;background:#fff}.practice-recorder{background:#f8fbff}.timer-line strong{font-variant-numeric:tabular-nums;font-size:18px}.dashboard-grid{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:18px}.review-queue{padding-left:1.3rem}.review-queue li+li{margin-top:9px}.review-queue span{display:block;color:var(--muted);font-size:12px}.learning-dashboard table{min-width:520px}
+.answer-editor label,.practice-recorder label{display:grid;gap:5px;margin:10px 0;font-size:13px;font-weight:700}.answer-editor textarea,.answer-editor input,.practice-recorder textarea,.practice-recorder input,.practice-recorder select{width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:9px;font:inherit;background:#fff}.technical-details{margin:12px 0!important;padding:9px 11px!important;border:1px dashed #cbd5e1!important;border-radius:9px!important;background:#f8fafc}.technical-details summary{color:#475569;font-size:13px}.practice-recorder{background:#f8fbff}.timer-line strong{font-variant-numeric:tabular-nums;font-size:18px}.dashboard-grid{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:18px}.review-queue{padding-left:1.3rem}.review-queue li+li{margin-top:9px}.review-queue span{display:block;color:var(--muted);font-size:12px}.learning-dashboard table{min-width:520px}
 @media(max-width:760px){main{width:min(100% - 18px,1180px);padding-top:10px}.hero{padding:22px;border-radius:16px}.scores{grid-template-columns:repeat(2,minmax(0,1fr))}.review{padding:15px}}
-@media(max-width:760px){.focus-grid,.history-grid,.action-grid,.bank-layout,.standard-versions,.cluster-grid,.dashboard-grid{grid-template-columns:1fr}.review-row{grid-template-columns:1fr}.topnav,.bank-sidebar{position:static}.bank-sidebar{max-height:none}.focus-main{padding:17px}#practice,.topic-group,.cluster-section,.review-center,.learning-dashboard{padding:18px}.topic-heading{display:block}.topic-frequency{white-space:normal}}
+@media(max-width:760px){.focus-grid,.history-grid,.action-grid,.bank-layout,.standard-versions,.cluster-grid,.dashboard-grid,.review-steps{grid-template-columns:1fr}.review-row{grid-template-columns:1fr}.review-entry{align-items:flex-start;flex-direction:column}.topnav,.bank-sidebar{position:static}.bank-sidebar{max-height:none}.focus-main{padding:17px}#practice,.topic-group,.cluster-section,.review-center,.learning-dashboard,.pending-group{padding:18px}.topic-heading{display:block}.topic-frequency{white-space:normal}}
 @media print{body{background:#fff}.topnav,.search,script{display:none!important}main{width:100%;padding:0}.hero{box-shadow:none;border-radius:0}section{break-inside:avoid}}
+
+/* 单场结果页：按“结论 → 行动 → 表现 → 证据”组织，减少首次阅读噪音。 */
+body[data-interview-case]{--paper:#f6f8fc;--line:#e3e8f0}
+body[data-interview-case] main{width:min(1080px,calc(100% - 32px));padding-top:18px}
+body[data-interview-case] .topnav{gap:7px;padding:8px 10px;background:#ffffffeb;box-shadow:0 5px 18px #1720330b}
+body[data-interview-case] .topnav a{padding:5px 9px;border-radius:7px;color:#475569}
+body[data-interview-case] .topnav a:hover{background:#eef4ff;color:var(--blue);text-decoration:none}
+body[data-interview-case] .case-hero{display:grid;grid-template-columns:minmax(0,1fr) 220px;gap:22px;align-items:stretch;padding:26px 28px;background:linear-gradient(118deg,#172554 0%,#1e40af 62%,#0e7490 100%)}
+body[data-interview-case] .case-hero h1{font-size:clamp(25px,4vw,38px);margin:8px 0 9px}
+body[data-interview-case] .case-hero p{margin:0;opacity:.82}
+body[data-interview-case] .case-hero-result{display:flex;flex-direction:column;justify-content:center;gap:3px;padding:17px 18px;border:1px solid #ffffff38;border-radius:13px;background:#ffffff14}
+body[data-interview-case] .case-hero-result span{font-size:12px;opacity:.75}
+body[data-interview-case] .case-hero-result strong{font-size:25px;line-height:1.3}
+body[data-interview-case] .case-hero-result small{margin-top:5px;opacity:.72}
+body[data-interview-case] .case-section{margin-top:22px}
+body[data-interview-case] .section-heading{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:11px}
+body[data-interview-case] .section-heading h2{margin:1px 0 0;font-size:21px}
+body[data-interview-case] .section-kicker{font-size:12px;color:#41638f;font-weight:800;letter-spacing:.08em}
+body[data-interview-case] .section-note{font-size:12px;color:var(--muted);white-space:nowrap}
+body[data-interview-case] #focus{margin-top:22px;padding:22px;border:1px solid #c9daf0;border-radius:16px;background:#fff;box-shadow:0 8px 24px #17203308}
+body[data-interview-case] #focus>h2{font-size:21px}
+body[data-interview-case] #focus .focus-main{background:#eef4ff;border-left-width:4px;padding:17px 19px}
+body[data-interview-case] #focus .focus-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+body[data-interview-case] .performance-section{padding:20px 22px;border:1px solid var(--line);border-radius:16px;background:#fff}
+body[data-interview-case] .performance-section .score-card{box-shadow:none;border-color:#e6ebf2;background:#fbfcfe}
+body[data-interview-case] .practice-section{padding:22px;border:1px solid var(--line);border-radius:16px;background:#fff}
+body[data-interview-case] .practice-section .practice-card{padding:18px 0 20px}
+body[data-interview-case] .materials-section{padding:22px;border:1px solid var(--line);border-radius:16px;background:#f9fafc}
+body[data-interview-case] .materials-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:15px}
+body[data-interview-case] .material-card{margin:0;padding:15px 16px;border:1px solid var(--line);border-radius:12px;background:#fff}
+body[data-interview-case] .material-card h3{margin:0 0 7px;font-size:16px}
+body[data-interview-case] .material-card details{margin:0;border:0;padding:0}
+body[data-interview-case] .material-card details summary{padding:6px 0;color:#31577d}
+body[data-interview-case] #history{margin-top:24px;padding:22px;border:1px solid var(--line);border-radius:16px;background:#fff}
+body[data-interview-case] #evidence{margin-top:24px;padding:22px;border:1px solid var(--line);border-radius:16px;background:#fff}
+body[data-interview-case] #evidence>h2{font-size:20px}
+@media(max-width:760px){body[data-interview-case] main{width:min(100% - 18px,1080px)}body[data-interview-case] .case-hero{grid-template-columns:1fr;padding:22px}.case-hero-result{min-height:0}body[data-interview-case] #focus .focus-grid,body[data-interview-case] .materials-grid{grid-template-columns:1fr}body[data-interview-case] .section-heading{display:block}body[data-interview-case] .section-note{display:block;margin-top:3px}}
+body[data-interview-history] main{width:min(1180px,calc(100% - 32px));padding-top:18px}
+body[data-interview-history] .overview-hero{padding:27px 30px;background:linear-gradient(118deg,#172554 0%,#1e40af 60%,#0e7490 100%)}
+body[data-interview-history] .overview-hero h1{font-size:clamp(28px,5vw,42px);margin:6px 0 7px}
+body[data-interview-history] .overview-hero p{margin:0;opacity:.84}
+body[data-interview-history] .overview-links{display:flex;gap:9px;flex-wrap:wrap;margin-top:17px}
+body[data-interview-history] .secondary-link{display:inline-block;padding:8px 13px;border:1px solid #ffffff5c;border-radius:9px;color:#fff;font-weight:700}
+body[data-interview-history] .secondary-link:hover{background:#ffffff18;text-decoration:none}
+body[data-interview-history] #overview{display:grid;gap:0}
+body[data-interview-history] #overview>#history{order:4}
+body[data-interview-history] #overview>#next-actions{order:1}
+body[data-interview-history] #overview>#practice{order:2}
+body[data-interview-history] #overview>.deep-link{order:3}
+body[data-interview-history] #overview>.review-entry{order:0}
+body[data-interview-history] #history{padding:22px;border:1px solid var(--line);border-radius:16px;background:#fff}
+body[data-interview-history] #question-bank{margin-top:26px;padding-top:8px;border-top:1px solid var(--line)}
+body[data-interview-history] #question-bank:before{content:"题库与高频问法";display:block;margin:0 0 15px;font-size:24px;font-weight:800;color:var(--ink)}
+body[data-interview-history] .question-bank-summary{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin:0 0 18px;padding:12px 15px;border:1px solid #dbe5f2;border-radius:12px;background:#f7faff;color:var(--muted)}
+body[data-interview-history] .question-bank-summary strong{color:var(--ink);font-size:15px}
+body[data-interview-history] #question-bank .learning-dashboard{margin-top:0}
+body[data-interview-history] .bank-content>h2{margin-top:25px}
+@media(max-width:760px){body[data-interview-history] main{width:min(100% - 18px,1180px)}body[data-interview-history] .overview-hero{padding:22px}.overview-links{gap:7px}body[data-interview-history] #question-bank{display:block}body[data-interview-history] .bank-sidebar{position:static;max-height:none}}
 """
 
 
@@ -1386,6 +1480,27 @@ SCRIPT = """
       node.textContent = `待导出 ${queuedActions.length} 项`;
     });
   };
+  const reviewStatusLabels = {
+    confirmed: '确认正确',
+    pending: '暂不确定',
+    rejected: '不应采用',
+  };
+  const reviewIdentity = item => `${item.dataset.reviewKind}:${item.dataset.reviewId}`;
+  const updateReviewState = item => {
+    const selected = queuedActions.find(action => actionIdentity(action) === reviewIdentity(item));
+    item.querySelectorAll('[data-review-status]').forEach(button => {
+      const active = Boolean(selected && button.dataset.reviewStatus === selected.status);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    const undo = item.querySelector('[data-review-undo]');
+    if (undo) undo.hidden = !selected;
+    const result = item.querySelector('[data-review-result]');
+    if (!result) return;
+    result.classList.toggle('selected', Boolean(selected));
+    result.textContent = selected
+      ? `已选择：${reviewStatusLabels[selected.status] || selected.status}；尚未写入档案`
+      : '尚未选择；导出并应用后才会生效';
+  };
   document.querySelectorAll('[data-review-status]').forEach(button => {
     button.addEventListener('click', () => {
       const item = button.closest('[data-review-item]');
@@ -1401,7 +1516,7 @@ SCRIPT = """
             short_30s: editor.querySelector('[data-edit-short]').value,
             standard_2m: editor.querySelector('[data-edit-standard]').value,
             followups: JSON.parse(editor.querySelector('[data-edit-followups]').value),
-            limitations: editor.querySelector('[data-edit-limitations]').value.split('\n').map(value => value.trim()).filter(Boolean),
+            limitations: editor.querySelector('[data-edit-limitations]').value.split('\\n').map(value => value.trim()).filter(Boolean),
             sources: JSON.parse(editor.querySelector('[data-edit-sources]').value),
             source_questions: JSON.parse(editor.querySelector('[data-edit-source-questions]').value),
           };
@@ -1416,7 +1531,7 @@ SCRIPT = """
         if (result) result.textContent = `JSON 格式错误：${error.message}`;
         return;
       }
-      const reason = window.prompt('请填写确认、驳回或修订原因（会写入修订记录）：', '人工核对');
+      const reason = window.prompt('请简要说明判断依据（会保留在修订记录中）：', '人工核对');
       if (!reason || !reason.trim()) return;
       const action = {
         kind: item.dataset.reviewKind,
@@ -1427,7 +1542,18 @@ SCRIPT = """
       };
       if (patch) action.patch = patch;
       saveQueue(action);
-      if (result) result.textContent = '已加入本机队列，尚未写入档案';
+      updateReviewState(item);
+    });
+  });
+  document.querySelectorAll('[data-review-undo]').forEach(button => {
+    button.addEventListener('click', () => {
+      const item = button.closest('[data-review-item]');
+      if (!item) return;
+      const identity = reviewIdentity(item);
+      queuedActions = queuedActions.filter(action => actionIdentity(action) !== identity);
+      persistQueue();
+      updateQueue();
+      updateReviewState(item);
     });
   });
   document.querySelectorAll('[data-practice-widget]').forEach(widget => {
@@ -1474,7 +1600,7 @@ SCRIPT = """
     if (!queuedActions.length) { if (message) message.textContent = '当前没有待导出操作'; return; }
     if (!window.confirm('导出 JSON 可能包含个人练习回答和修订内容。请将其保存在受控本地位置。继续导出？')) return;
     const payload = {schema_version: 1, generated_at: new Date().toISOString(), actions: queuedActions};
-    const blob = new Blob([JSON.stringify(payload, null, 2) + '\n'], {type: 'application/json'});
+    const blob = new Blob([JSON.stringify(payload, null, 2) + '\\n'], {type: 'application/json'});
     const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
     link.download = `interview-review-actions-${new Date().toISOString().slice(0,10)}.json`;
     link.click(); window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
@@ -1493,6 +1619,7 @@ SCRIPT = """
     const toggle = document.querySelector('[data-persist-actions]');
     if (toggle) toggle.checked = false;
     updateQueue();
+    document.querySelectorAll('[data-review-item]').forEach(updateReviewState);
     const message = document.querySelector('[data-action-message]');
     if (message) message.textContent = '当前档案队列和旧版本地队列已清空';
   });
@@ -1515,6 +1642,7 @@ SCRIPT = """
     });
   }
   updateQueue();
+  document.querySelectorAll('[data-review-item]').forEach(updateReviewState);
 })();
 """
 
@@ -1532,7 +1660,8 @@ def render_history_section(cases: list[dict[str, Any]], current: str | None, fro
 </section>"""
 
 
-def render_review_center(root: Path) -> str:
+def pending_review_items(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return pending answers, clusters, and profile facts in stable display order."""
     standards = read_json(root / "profile" / "standard-answers.json", {})
     clusters = read_json(root / "profile" / "question-clusters.json", {})
     state = read_json(root / "profile" / "state.json", {})
@@ -1549,31 +1678,201 @@ def render_review_center(root: Path) -> str:
         for item in values if isinstance(values, list) else []:
             if isinstance(item, dict) and item.get("status") == "pending":
                 pending_events.append(item)
+    pending_answers.sort(key=lambda item: (
+        -len(item.get("source_questions", [])) if isinstance(item.get("source_questions"), list) else 0,
+        str(item.get("title") or item.get("answer_id") or ""),
+    ))
+    def cluster_frequency_key(item: dict[str, Any]) -> tuple[int, int, str]:
+        refs = item.get("questions", [])
+        refs = refs if isinstance(refs, list) else []
+        case_ids = {
+            str(ref.get("case_id") or "")
+            for ref in refs
+            if isinstance(ref, dict) and ref.get("case_id")
+        }
+        return (-len(case_ids), -len(refs), str(item.get("label") or item.get("cluster_id") or ""))
+
+    pending_clusters.sort(key=cluster_frequency_key)
     pending_events.sort(key=lambda item: (str(item.get("type") or ""), str(item.get("key") or "")))
-    event_rows = []
-    for item in pending_events:
+    return pending_answers, pending_clusters, pending_events
+
+
+def split_priority_review(
+    pending_answers: list[dict[str, Any]],
+    pending_clusters: list[dict[str, Any]],
+    pending_events: list[dict[str, Any]],
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+]:
+    """Show the highest-frequency question groups first; defer every other review type."""
+    priority_clusters = pending_clusters[:PRIORITY_REVIEW_LIMIT]
+    deferred_clusters = pending_clusters[len(priority_clusters):]
+    return priority_clusters, pending_answers, deferred_clusters, pending_events
+
+
+def _clip_review_text(value: str, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    return text[:limit] + ("…" if len(text) > limit else "")
+
+
+def _profile_event_context(item: dict[str, Any], case_by_id: dict[str, dict[str, Any]]) -> tuple[str, str]:
+    """Locate question/answer evidence for a profile reminder without inventing missing context."""
+    case = case_by_id.get(str(item.get("case_id") or ""))
+    evidence_ids = {str(value) for value in item.get("evidence", []) if value}
+    if not case or not evidence_ids:
+        return "", ""
+    segments = transcript_segments(case["path"])
+    qa = read_json(case["path"] / "qa-tree.json", {})
+    matches: list[tuple[int, str, str]] = []
+    for question in qa.get("questions", []):
+        if not isinstance(question, dict):
+            continue
+        question_ids = {str(value) for value in question.get("question_evidence", []) if value}
+        answer_ids = {str(value) for value in question.get("answer_evidence", []) if value}
+        overlap = len(evidence_ids & (question_ids | answer_ids))
+        if not overlap:
+            continue
+        original = " ".join(
+            str(segments[segment_id].get("text_corrected") or segments[segment_id].get("text_raw") or "").strip()
+            for segment_id in question_ids
+            if segment_id in evidence_ids and segment_id in segments
+            and segments[segment_id].get("role") == "interviewer"
+        )
+        answer = " ".join(
+            str(segments[segment_id].get("text_corrected") or segments[segment_id].get("text_raw") or "").strip()
+            for segment_id in answer_ids
+            if segment_id in evidence_ids and segment_id in segments
+            and segments[segment_id].get("role") == "candidate"
+        )
+        matches.append((overlap, original, answer))
+    if matches:
+        _, original, answer = max(matches, key=lambda value: (value[0], len(value[1]), len(value[2])))
+        return _clip_review_text(original, 420), _clip_review_text(answer, 900)
+    original = " ".join(
+        str(segments[segment_id].get("text_corrected") or segments[segment_id].get("text_raw") or "").strip()
+        for segment_id in evidence_ids
+        if segment_id in segments and segments[segment_id].get("role") == "interviewer"
+    )
+    answer = " ".join(
+        str(segments[segment_id].get("text_corrected") or segments[segment_id].get("text_raw") or "").strip()
+        for segment_id in evidence_ids
+        if segment_id in segments and segments[segment_id].get("role") == "candidate"
+    )
+    return _clip_review_text(original, 420), _clip_review_text(answer, 900)
+
+
+def render_profile_event_rows(events: list[dict[str, Any]], cases: list[dict[str, Any]]) -> str:
+    case_by_id = {str(case["case_id"]): case for case in cases}
+    rows = []
+    for item in events:
         event_id = str(item.get("event_id") or "")
-        event_rows.append(
+        event_type = label("profile_type", item.get("type"))
+        original, answer = _profile_event_context(item, case_by_id)
+        context_html = (
+            f'<div class="review-evidence"><p><strong>原始问题：</strong>{html.escape(original)}</p>'
+            f'<p><strong>我的现场回答：</strong>{html.escape(answer)}</p></div>'
+            if original or answer else
+            '<div class="review-evidence"><p class="muted"><strong>原始问题和我的回答：</strong>未能从现有证据可靠定位，请查看对应面试原文。</p></div>'
+        )
+        rows.append(
             '<article class="review-row"><div><strong>'
-            f'{html.escape(str(item.get("key") or event_id))}</strong>'
-            f'<p>{html.escape(str(item.get("reason") or "无说明"))}</p>'
-            f'<small>{html.escape(str(item.get("type") or "未分类"))} · {html.escape(str(item.get("case_id") or ""))}</small></div>'
+            f'{html.escape(event_type or "复盘提醒")}</strong>'
+            f'{context_html}'
+            f'<p><strong>AI 提醒：</strong>{html.escape(str(item.get("reason") or "无说明"))}</p>'
+            f'<small>{html.escape(str(item.get("key") or event_id))} · {html.escape(str(item.get("case_id") or ""))}</small></div>'
             f'{review_buttons("profile_event", event_id, "pending")}</article>'
         )
+    return "".join(rows)
+
+
+def render_pending_review_entry(root: Path) -> str:
+    pending_answers, pending_clusters, pending_events = pending_review_items(root)
     total = len(pending_answers) + len(pending_clusters) + len(pending_events)
+    priority_clusters, _, _, _ = split_priority_review(
+        pending_answers,
+        pending_clusters,
+        pending_events,
+    )
+    priority_total = len(priority_clusters)
+    deferred_total = total - priority_total
+    return (
+        '<section class="review-entry"><div><h2>待确认内容已单独整理</h2>'
+        f'<p>本轮优先确认 {priority_total} 项；其余 {deferred_total} 项继续保留待核验，不要求现在处理。</p>'
+        '<p class="muted">本轮只确认 AI 是否把同类问题归对了；答案内容和长期档案暂不要求处理。</p></div>'
+        f'<a class="primary-link" href="{PENDING_REVIEW_HTML}">打开待确认页面 →</a></section>'
+    )
+
+
+def render_review_center(root: Path, cases: list[dict[str, Any]]) -> str:
+    pending_answers, pending_clusters, pending_events = pending_review_items(root)
+    priority_clusters, deferred_answers, deferred_clusters, deferred_events = split_priority_review(
+        pending_answers,
+        pending_clusters,
+        pending_events,
+    )
+    total = len(pending_answers) + len(pending_clusters) + len(pending_events)
+    priority_total = len(priority_clusters)
+    deferred_total = total - priority_total
+    case_by_id = {str(case["case_id"]): case for case in cases}
+    deferred_answer_cards = "".join(
+        render_standard_answer(answer, case_by_id, editable=True)
+        for answer in deferred_answers
+    )
+    priority_cluster_ids = {str(item.get("cluster_id") or "") for item in priority_clusters}
+    deferred_cluster_ids = {str(item.get("cluster_id") or "") for item in deferred_clusters}
+    priority_cluster_section, _, _ = render_question_clusters(
+        root,
+        cases,
+        editable=True,
+        status_filter={"pending"},
+        cluster_ids=priority_cluster_ids,
+        section_id="priority-review",
+        section_title=f"先确认最高频的 {priority_total} 组问题",
+        section_intro="这里只确认分组是否合理：组内原题是不是在问同一个核心问题。暂时不用审核答案内容。",
+        question_page=HISTORY_HTML,
+    )
+    deferred_cluster_section, _, _ = render_question_clusters(
+        root,
+        cases,
+        editable=True,
+        status_filter={"pending"},
+        cluster_ids=deferred_cluster_ids,
+        section_id="deferred-clusters",
+        section_title="其他问题分组",
+        section_intro="这些分组频率较低，本轮不需要处理；需要时再确认。",
+        question_page=HISTORY_HTML,
+    )
+    deferred_event_rows = render_profile_event_rows(deferred_events, cases)
     return (
         '<section id="review-center" class="review-center"><div class="topic-heading"><h2>事实与答案确认中心</h2>'
-        f'<span class="topic-frequency">共 {total} 项待确认</span></div>'
-        '<p class="muted">页面不会直接改写档案。确认、驳回或修订会先进入本机操作队列；导出 JSON 后由 Skill 校验旧状态并追加修订记录。</p>'
+        f'<span class="topic-frequency">本轮建议 {priority_total} 项</span></div>'
+        f'<p>本轮只确认最高频的 {priority_total} 组问题是否归类正确；其余 {deferred_total} 项留在下方说明区，可直接跳过。</p>'
+        '<ol class="review-steps"><li><strong>第 1 步：逐项判断</strong><span>选择“确认正确”“暂不确定”或“不应采用”</span></li>'
+        '<li><strong>第 2 步：导出选择</strong><span>点击“导出待处理结果”，下载本机 JSON 文件</span></li>'
+        '<li><strong>第 3 步：应用到档案</strong><span>回到对话说“应用刚导出的审核结果”</span></li></ol>'
         '<div class="review-summary">'
-        f'<span>成熟答案 {len(pending_answers)}</span><span>高频问法 {len(pending_clusters)}</span><span>长期档案 {len(pending_events)}</span>'
+        f'<span>本轮优先 {priority_total}</span><span>暂缓处理 {deferred_total}</span>'
         '<span data-action-count>待导出 0 项</span></div>'
-        '<div class="review-toolbar"><button type="button" data-export-actions>导出操作 JSON</button>'
-        '<button type="button" class="secondary" data-clear-actions>清空本机队列</button>'
-        '<label><input type="checkbox" data-persist-actions> 在本机持久保存 30 天</label>'
-        '<span data-action-message></span></div>'
-        + (f'<details><summary>处理 {len(pending_events)} 条长期档案事实</summary><div class="review-list">{"".join(event_rows)}</div></details>' if event_rows else '<p>长期档案暂无待确认项。</p>')
-        + '<p class="muted">成熟答案和高频问法可在各自卡片中直接修订或确认。</p></section>'
+        '<div class="review-toolbar"><button type="button" data-export-actions>导出待处理结果</button>'
+        '<button type="button" class="secondary" data-clear-actions>清空尚未导出的选择</button>'
+        '<label><input type="checkbox" data-persist-actions> 关闭页面后保留选择（最长 30 天）</label>'
+        '<span data-action-message></span></div></section>'
+        + (priority_cluster_section if priority_cluster_section else '<section class="pending-group" id="priority-review"><h2>先确认最高频问题</h2><p class="muted">当前没有待确认的问题分组。</p></section>')
+        + f'<details class="pending-backlog" id="deferred-review"><summary>查看其余 {deferred_total} 项说明（本轮可跳过）</summary>'
+        + '<section class="pending-group" id="pending-answers"><div class="topic-heading"><h2>成熟答案</h2>'
+        f'<span class="topic-frequency">{len(deferred_answers)} 项</span></div>'
+        + '<p class="muted">这是 AI 根据多场回答整理的参考答法。确认它，表示你认可文字内容和事实边界，可作为以后练习或面试准备的答案；本轮不要求处理。</p>'
+        + (deferred_answer_cards if deferred_answer_cards else '<p class="muted">暂无其余成熟答案。</p>')
+        + '</section>'
+        + deferred_cluster_section
+        + '<section class="pending-group" id="pending-facts"><div class="topic-heading"><h2>AI 给你的复习提醒</h2>'
+        f'<span class="topic-frequency">{len(deferred_events)} 项</span></div>'
+        + '<p class="muted">这是 AI 根据面试记录整理的提醒：哪些知识点可能要复习、哪些回答容易被追问、哪些简历说法需要补证据。它只是提醒，不是已经确认的结论；本轮可以先跳过。</p>'
+        + (f'<div class="review-list">{deferred_event_rows}</div>' if deferred_event_rows else '<p class="muted">暂无长期档案待核验资料。</p>')
+        + '</section></details>'
     )
 
 
@@ -1647,20 +1946,21 @@ def render_case(case: dict[str, Any], cases: list[dict[str, Any]]) -> str:
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 {SECURITY_META}<title>{html.escape(case['company'])} · {html.escape(case['role'])} · 面试复盘</title><style>{STYLE}</style></head>
-<body data-interview-case="{html.escape(case['case_id'], quote=True)}" data-store-id="{archive_id(root)}"><main>
-<nav class="topnav" aria-label="本页导航"><a href="../../{HISTORY_HTML}">历史总览</a><a href="../../{QUESTION_BANK_HTML}">面试题库</a><a href="#focus">下一步</a><a href="#practice">本场练习题</a><a href="#review">完整复盘</a><a href="#jd">岗位 JD</a><a href="#claims">技术核验</a><a href="#evidence">逐字稿</a></nav>
-<header class="hero"><div class="eyebrow">Interview System · Offline Review</div>
+<body data-interview-case="{html.escape(case['case_id'], quote=True)}" data-store-id="{archive_id(root)}"><main class="case-page">
+<nav class="topnav" aria-label="本页导航"><a href="../../{HISTORY_HTML}">面试总览</a><a href="../../{HISTORY_HTML}#question-bank">题库</a><a href="../../{PENDING_REVIEW_HTML}">待确认</a><a href="#focus">下一步</a><a href="#performance">表现</a><a href="#practice">练习</a><a href="#materials">证据与材料</a></nav>
+<header class="hero case-hero"><div class="case-hero-copy"><div class="eyebrow">Interview System · Offline Review</div>
 <h1>{html.escape(case['company'])}<br>{html.escape(case['role'])}</h1>
-<p>{html.escape(case['datetime'])}</p><div class="meta">{meta}</div></header>
+<p>{html.escape(case['datetime'])}</p><div class="meta">{meta}</div></div><aside class="case-hero-result"><span>本场结果</span><strong>{html.escape(case['result'])}</strong><small>{html.escape(str(case['date']))} · {html.escape(str(case['round']))}</small></aside></header>
 {privacy_notice()}
 {warning_block}
 {review_focus(review)}
+<section id="performance" class="case-section performance-section"><div class="section-heading"><div><span class="section-kicker">快速概览</span><h2>表现概览</h2></div><span class="section-note">只看本场，不做跨岗位排名</span></div><div class="grid scores">{score_cards(scores.get('overall', {}))}</div></section>
 {render_case_practice(case)}
-<section><h2>四维表现</h2><div class="grid scores">{score_cards(scores.get('overall', {}))}</div></section>
-<section id="review"><h2>完整复盘</h2><details><summary>展开完整复盘与原始建议</summary><div class="review">{markdown_to_html(review)}</div></details></section>
-<section id="jd"><h2>岗位 JD 原文</h2><details><summary>展开本场保存的 JD 原文</summary>{jd_source(case_path, manifest)}</details></section>
-<section id="jd-matrix"><h2>JD 能力矩阵</h2><details><summary>展开逐项岗位对照</summary>{jd_table(matrix)}</details></section>
-<section id="claims"><h2>技术核验</h2><details><summary>展开逐条技术结论与来源</summary>{claims_table(claims)}</details></section>
+<section id="materials" class="case-section materials-section"><div class="section-heading"><div><span class="section-kicker">需要时再看</span><h2>证据与材料</h2></div><span class="section-note">原始资料默认收起</span></div><p class="muted">这里保留完整复盘、岗位要求、技术核验和逐字稿，适合核对依据，不是首次阅读入口。</p>
+<div class="materials-grid"><section id="review" class="material-card"><h3>完整复盘</h3><details><summary>展开完整复盘与原始建议</summary><div class="review">{markdown_to_html(review)}</div></details></section>
+<section id="jd" class="material-card"><h3>岗位 JD 原文</h3><details><summary>展开本场保存的 JD 原文</summary>{jd_source(case_path, manifest)}</details></section>
+<section id="jd-matrix" class="material-card"><h3>JD 能力矩阵</h3><details><summary>展开逐项岗位对照</summary>{jd_table(matrix)}</details></section>
+<section id="claims" class="material-card"><h3>技术核验</h3><details><summary>展开逐条技术结论与来源</summary>{claims_table(claims)}</details></section></div></section>
 {render_history_section(cases, case['case_id'], True)}
 <section id="evidence"><h2>逐字稿证据</h2><details><summary>展开全部片段</summary>{transcript_view(case_path)}</details></section>
 <p class="foot">本页由本地结构化产物生成。HTML 是展示视图，不替代原始逐字稿、JSON、JD、简历或技术来源。</p>
@@ -1670,20 +1970,47 @@ def render_case(case: dict[str, Any], cases: list[dict[str, Any]]) -> str:
 def render_history_index(root: Path, cases: list[dict[str, Any]]) -> str:
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-{SECURITY_META}<title>面试历史总览</title><style>{STYLE}</style></head><body data-interview-history data-store-id="{archive_id(root)}"><main>
-<header class="hero"><div class="eyebrow">Interview System · Local Archive</div><h1>面试历史总览</h1>
-<p>先看待办，再按场次查证据。共 {len(cases)} 场；只展示本地档案。</p>
-<p><a class="primary-link" href="{QUESTION_BANK_HTML}">打开完整面试题库 →</a></p></header>
+{SECURITY_META}<title>面试总览</title><style>{STYLE}</style></head><body data-interview-history data-store-id="{archive_id(root)}"><main>
+<nav class="topnav" aria-label="本页导航"><a href="#overview">总览</a><a href="#history">面试场次</a><a href="#question-bank">题库</a><a href="{PENDING_REVIEW_HTML}">待确认</a></nav>
+<header class="hero overview-hero"><div class="eyebrow">Interview System · Local Archive</div><h1>面试总览</h1>
+<p>一页查看面试场次、待办、练习重点和全部题库。共 {len(cases)} 场；只展示本地档案。</p>
+<div class="overview-links"><a class="primary-link" href="#history">查看面试场次 →</a><a class="secondary-link" href="#question-bank">进入题库 →</a><a class="secondary-link" href="{PENDING_REVIEW_HTML}">处理待确认</a></div></header>
 {privacy_notice()}
+<div id="overview">
+{render_pending_review_entry(root)}
 {render_plan_summary(root)}
 {render_history_practice(root, cases)}
 {cross_case_report_link(root)}
 {render_history_section(cases, None, False)}
-<p class="foot">结果仅用于历史记录，不用于生成通过率或推断单一题目的因果。</p>
+</div>
+{render_question_bank_content(root, cases, question_page=HISTORY_HTML)}
+<p class="foot">结果仅用于历史记录，不用于生成通过率或推断单一题目的因果。题库与历史场次已合并到本页；旧题库文件仅作为兼容入口。</p>
 </main><script>{SCRIPT}</script></body></html>"""
 
 
-def render_question_bank(root: Path, cases: list[dict[str, Any]]) -> str:
+def render_pending_review(root: Path, cases: list[dict[str, Any]]) -> str:
+    pending_answers, pending_clusters, pending_events = pending_review_items(root)
+    total = len(pending_answers) + len(pending_clusters) + len(pending_events)
+    priority_clusters, _, _, _ = split_priority_review(
+        pending_answers,
+        pending_clusters,
+        pending_events,
+    )
+    priority_total = len(priority_clusters)
+    deferred_total = total - priority_total
+    return f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+{SECURITY_META}<title>待确认内容</title><style>{STYLE}</style></head><body data-interview-pending-review data-store-id="{archive_id(root)}"><main>
+<nav class="topnav" aria-label="本页导航"><a href="{HISTORY_HTML}">面试总览</a><a href="{HISTORY_HTML}#question-bank">题库</a><a href="#review-center">处理流程</a><a href="#priority-review">本轮优先</a><a href="#deferred-review">其余资料</a></nav>
+<header class="hero"><div class="eyebrow">Interview System · Pending Review</div><h1>待确认内容</h1>
+<p>本轮先确认最高频的 {priority_total} 组问题；其余 {deferred_total} 项继续保留，本轮不要求处理。</p></header>
+{privacy_notice()}
+{render_review_center(root, cases)}
+<p class="foot">选择只保存在本机队列；导出后回到对话说“应用刚导出的审核结果”，校验通过后才会写入档案。</p>
+</main><script>{SCRIPT}</script></body></html>"""
+
+
+def render_question_bank_content(root: Path, cases: list[dict[str, Any]], *, question_page: str = HISTORY_HTML) -> str:
     grouped: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = {}
     topic_cases: dict[str, set[str]] = {}
     case_views: dict[
@@ -1700,7 +2027,9 @@ def render_question_bank(root: Path, cases: list[dict[str, Any]]) -> str:
     standard_by_question = standard_answer_question_map(root)
     standard_answer_count = sum(len(values) for values in standard_answers.values())
     case_by_id = {str(case["case_id"]): case for case in cases}
-    cluster_section, cluster_bookmarks, cluster_count = render_question_clusters(root, cases)
+    cluster_section, cluster_bookmarks, cluster_count = render_question_clusters(
+        root, cases, question_page=question_page
+    )
     for case in cases:
         case_id = str(case["case_id"])
         segments = transcript_segments(case["path"])
@@ -1752,22 +2081,32 @@ def render_question_bank(root: Path, cases: list[dict[str, Any]]) -> str:
             f'<div class="practice-grid">{"".join(cards)}</div></section>'
         )
     total_questions = sum(len(values) for values in grouped.values())
-    return f"""<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-{SECURITY_META}<title>面试题库</title><style>{STYLE}</style></head><body data-interview-question-bank data-store-id="{archive_id(root)}"><main>
-<nav class="topnav" aria-label="本页导航"><a href="{HISTORY_HTML}">历史总览</a><a href="#review-center">确认中心</a><a href="#learning-dashboard">练习计划</a><a href="#question-bank">全部题目</a></nav>
-<header class="hero"><div class="eyebrow">Interview System · Question Bank</div><h1>面试题库</h1>
-<p>共 {total_questions} 道真实面试题，来自 {len(cases)} 场；{cluster_count} 组跨场高频问法，{standard_answer_count} 份跨场成熟答案，{answer_count} 道已有推荐答案，{source_count} 道绑定了技术核验资料。</p></header>
-{privacy_notice()}
-<div id="question-bank" class="bank-layout">
+    question_summary = (
+        f'共 {total_questions} 道真实面试题，{cluster_count} 组跨场高频问法，'
+        f'{standard_answer_count} 份跨场成熟答案，{answer_count} 道已有推荐答案，'
+        f'{source_count} 道绑定了技术核验资料。'
+    )
+    return f"""<div id="question-bank" class="bank-layout">
 <aside class="bank-sidebar"><h2>搜索与书签</h2>
 <div class="search-line"><label for="question-search">搜索全部题目</label><input id="question-search" class="search" data-question-search type="search" placeholder="问题、公司、岗位、回答或诊断"><span data-question-count></span></div>
 <div class="practice-guide"><strong>练习方法</strong><br>先脱稿回答，再对照现场回答与复盘诊断；代码题再运行边界测试。此说明只展示一次。</div>
 {f'<h3 class="bookmark-title">高频问法</h3><nav class="bookmark-list" aria-label="跨场高频重复问法">{cluster_bookmarks}</nav>' if cluster_bookmarks else ''}
 <h3 class="bookmark-title">主题</h3><nav class="bookmark-list" aria-label="按主题覆盖频率排序的书签">{"".join(bookmarks)}</nav></aside>
-<div class="bank-content">{render_review_center(root)}{render_learning_dashboard(root)}{cluster_section}<h2>全部面试题（按主题频率排序）</h2><p class="muted">高频问法按跨场语义归并统计；主题仍按覆盖的面试场次数排序，题数用于次级排序。主题归类基于可解释的关键词规则，不代表语义完全相同。每题保留原始场次证据。</p>
-{"".join(sections)}<div class="empty" data-question-empty>没有匹配的面试题。</div></div></div>
-<p class="foot">题面来自问答树整理；原始问答以各场逐字稿证据为准。推荐答案是学习材料，不代表当场回答。</p>
+<div class="bank-content"><div class="question-bank-summary"><strong>题库概览</strong><span>{html.escape(question_summary)}</span></div>{render_learning_dashboard(root)}{cluster_section}<h2>全部面试题（按主题频率排序）</h2><p class="muted">高频问法按跨场语义归并统计；主题仍按覆盖的面试场次数排序，题数用于次级排序。主题归类基于可解释的关键词规则，不代表语义完全相同。每题保留原始场次证据。</p>
+{"".join(sections)}<div class="empty" data-question-empty>没有匹配的面试题。</div></div></div>"""
+
+
+def render_question_bank(root: Path, cases: list[dict[str, Any]]) -> str:
+    """Keep the old file as a compatibility entry after history and question bank merge."""
+    total_questions = sum(len(practice_items(case["path"])) for case in cases)
+    return f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+{SECURITY_META}<title>面试题库已合并</title><style>{STYLE}</style></head><body data-interview-question-bank data-store-id="{archive_id(root)}"><main>
+<header class="hero"><div class="eyebrow">Interview System · Unified Overview</div><h1>题库已并入面试总览</h1>
+<p>共 {total_questions} 道真实面试题。以后从一个页面查看历史场次和题库，减少来回切换。</p>
+<p><a class="primary-link" href="{HISTORY_HTML}#question-bank">进入面试总览中的题库 →</a></p></header>
+{privacy_notice()}
+<p class="foot">这是旧文件的兼容入口，数据与题库仍保留。</p>
 </main><script>{SCRIPT}</script></body></html>"""
 
 
@@ -1844,6 +2183,7 @@ def main() -> int:
                     "rendered": [],
                     "history_index": str(root / HISTORY_HTML),
                     "question_bank": str(root / QUESTION_BANK_HTML),
+                    "pending_review": str(root / PENDING_REVIEW_HTML),
                     "history_cases": len(cases),
                     "errors": errors,
                 },
@@ -1865,14 +2205,18 @@ def main() -> int:
         rendered.append(str(destination))
 
     history = render_history_index(root, cases)
-    errors.extend(smoke_check(history, ["data-interview-history", 'id="history"']))
+    errors.extend(smoke_check(history, ["data-interview-history", 'id="history"', 'id="question-bank"', "我的现场回答", "推荐答案"]))
     index_path = root / HISTORY_HTML
     question_bank = render_question_bank(root, cases)
-    errors.extend(smoke_check(question_bank, ["data-interview-question-bank", 'id="question-bank"', "我的现场回答", "推荐答案"]))
+    errors.extend(smoke_check(question_bank, ["data-interview-question-bank", "题库已并入面试总览", f'href="{HISTORY_HTML}#question-bank"']))
     question_bank_path = root / QUESTION_BANK_HTML
+    pending_review = render_pending_review(root, cases)
+    errors.extend(smoke_check(pending_review, ["data-interview-pending-review", 'id="review-center"', "导出待处理结果"]))
+    pending_review_path = root / PENDING_REVIEW_HTML
     if not errors:
         write_text(index_path, history)
         write_text(question_bank_path, question_bank)
+        write_text(pending_review_path, pending_review)
 
     status = "ok" if not errors else "error"
     print(
@@ -1882,6 +2226,7 @@ def main() -> int:
                 "rendered": rendered,
                 "history_index": str(index_path),
                 "question_bank": str(question_bank_path),
+                "pending_review": str(pending_review_path),
                 "history_cases": len(cases),
                 "errors": errors,
             },

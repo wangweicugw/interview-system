@@ -27,12 +27,15 @@ from coach_runner import run_case as run_coach_case  # noqa: E402
 from ingest_audio_transcript import normalize_segments, parse_artifact  # noqa: E402
 from pdf_ocr import extract_pdf  # noqa: E402
 from render_interview_html import (  # noqa: E402
+    PRIORITY_REVIEW_LIMIT,
     discover_cases,
     external_link,
     jd_source,
     render_case,
     render_history_practice,
+    render_profile_event_rows,
     safe_url,
+    split_priority_review,
 )
 
 
@@ -67,6 +70,49 @@ class WorkflowTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp.cleanup()
+
+    def test_pending_review_limits_default_workload(self) -> None:
+        answers = [{"answer_id": "answer-1"}, {"answer_id": "answer-2"}]
+        clusters = [
+            {"cluster_id": f"cluster-{index}", "questions": [{}] * question_count}
+            for index, question_count in enumerate((2, 9, 4, 8, 6, 7), start=1)
+        ]
+        clusters.sort(key=lambda item: (-len(item["questions"]), item["cluster_id"]))
+        events = [
+            {"event_id": "risk-1", "type": "resume_risk"},
+            {"event_id": "state-1", "type": "knowledge_state"},
+        ]
+
+        priority_clusters, deferred_answers, deferred_clusters, deferred_events = (
+            split_priority_review(answers, clusters, events)
+        )
+
+        self.assertEqual(len(priority_clusters), PRIORITY_REVIEW_LIMIT)
+        self.assertEqual(
+            [item["cluster_id"] for item in priority_clusters],
+            ["cluster-2", "cluster-4", "cluster-6", "cluster-5", "cluster-3"],
+        )
+        self.assertEqual(deferred_answers, answers)
+        self.assertEqual([item["cluster_id"] for item in deferred_clusters], ["cluster-1"])
+        self.assertEqual(deferred_events, events)
+
+    def test_profile_reminder_shows_question_and_candidate_answer(self) -> None:
+        result, case_path = self.ingest()
+        self.write_analysis(case_path, result["case_id"])
+        cases = discover_cases(self.root)
+        rows = render_profile_event_rows([{
+            "event_id": "event-1",
+            "case_id": result["case_id"],
+            "type": "knowledge_state",
+            "key": "cache/consistency",
+            "evidence": ["s-0003", "s-0004"],
+            "reason": "需要补失败边界。",
+        }], cases)
+        self.assertIn("原始问题：", rows)
+        self.assertIn("为什么选择这个顺序？", rows)
+        self.assertIn("我的现场回答：", rows)
+        self.assertIn("AI 提醒：", rows)
+        self.assertIn("知识点掌握情况", rows)
 
     def ingest(self) -> tuple[dict, Path]:
         result = run_script(
@@ -652,34 +698,57 @@ class WorkflowTest(unittest.TestCase):
         )
         self.assertEqual(rendered["status"], "ok")
         self.assertEqual(rendered["history_cases"], 2)
+        self.assertEqual(rendered["pending_review"], str((self.root / "interview-pending-review.html").resolve()))
 
         case_html = (case_path / "interview-review.html").read_text(encoding="utf-8")
         history_html = (self.root / "interview-history.html").read_text(encoding="utf-8")
         question_bank_html = (self.root / "interview-question-bank.html").read_text(encoding="utf-8")
+        pending_review_html = (self.root / "interview-pending-review.html").read_text(encoding="utf-8")
         HTMLParser().feed(case_html)
         HTMLParser().feed(history_html)
         HTMLParser().feed(question_bank_html)
-        for rendered_html in (case_html, history_html, question_bank_html):
+        HTMLParser().feed(pending_review_html)
+        node = shutil.which("node")
+        for scripted_html in (question_bank_html, pending_review_html):
+            script_match = re.search(r"<script>(.*?)</script>", scripted_html, re.DOTALL)
+            self.assertIsNotNone(script_match)
+            if node:
+                syntax_check = subprocess.run(
+                    [node, "--check"],
+                    input=script_match.group(1),
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(syntax_check.returncode, 0, syntax_check.stderr)
+        for rendered_html in (case_html, history_html, question_bank_html, pending_review_html):
             self.assertIn('http-equiv="Content-Security-Policy"', rendered_html)
             self.assertIn('default-src \'none\'', rendered_html)
             self.assertIn('name="referrer" content="no-referrer"', rendered_html)
             self.assertIn('data-store-id="', rendered_html)
             self.assertNotRegex(rendered_html, r'<(?:script|img|link)[^>]+(?:src|href)="https?://')
-        self.assertIn("sessionStorage", question_bank_html)
-        self.assertIn("interview-system-review-actions-v2:${archiveId}", question_bank_html)
-        self.assertIn("在本机持久保存 30 天", question_bank_html)
-        self.assertIn("↗ 外部资料", question_bank_html)
+        self.assertIn("sessionStorage", pending_review_html)
+        self.assertIn("interview-system-review-actions-v2:${archiveId}", pending_review_html)
+        self.assertIn("关闭页面后保留选择（最长 30 天）", pending_review_html)
+        self.assertIn("↗ 外部资料", history_html)
         self.assertIn("隐私提醒", case_html)
         self.assertIn("<td>深入考察</td>", case_html)
         self.assertIn("<td>高</td>", case_html)
         self.assertIn("表现较弱</span>", case_html)
         self.assertIn("说话人：已确认", case_html)
         self.assertIn("分析：已更新", case_html)
-        self.assertIn('<section id="jd"><h2>岗位 JD 原文</h2>', case_html)
+        self.assertIn('<section id="jd" class="material-card"><h3>岗位 JD 原文</h3>', case_html)
         self.assertIn("岗位要求：熟悉缓存一致性、数据库故障处理和可观测性。", case_html)
         self.assertLess(case_html.index('id="jd"'), case_html.index('id="jd-matrix"'))
         self.assertNotIn("<td>deep</td>", case_html)
         self.assertIn('data-interview-case="', case_html)
+        self.assertIn('class="case-page"', case_html)
+        self.assertIn('class="case-hero-result"', case_html)
+        self.assertIn('id="performance"', case_html)
+        self.assertIn('id="materials"', case_html)
+        self.assertLess(case_html.index('id="focus"'), case_html.index('id="performance"'))
+        self.assertLess(case_html.index('id="performance"'), case_html.index('id="practice"'))
+        self.assertLess(case_html.index('id="practice"'), case_html.index('id="materials"'))
         self.assertIn('id="focus"', case_html)
         self.assertIn('id="practice"', case_html)
         self.assertIn('.practice-grid{display:block}', case_html)
@@ -709,50 +778,72 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("示例公司", history_html)
         self.assertIn("第二家公司", case_html)
         self.assertIn("第二家公司", history_html)
-        self.assertIn('href="interview-question-bank.html"', history_html)
+        self.assertIn('id="question-bank"', history_html)
+        self.assertIn("面试总览", history_html)
+        self.assertIn('href="interview-pending-review.html"', history_html)
+        self.assertIn('href="../../interview-pending-review.html"', case_html)
         self.assertIn("data-interview-question-bank", question_bank_html)
-        self.assertIn('id="question-bank"', question_bank_html)
-        self.assertIn("全部面试题", question_bank_html)
-        self.assertIn("我的现场回答", question_bank_html)
-        self.assertIn("推荐答案", question_bank_html)
-        self.assertIn("为什么选择这个顺序", question_bank_html)
-        self.assertIn("data-question-search", question_bank_html)
-        self.assertIn("data-question-row", question_bank_html)
-        self.assertIn('class="bank-sidebar"', question_bank_html)
-        self.assertIn("搜索与书签", question_bank_html)
-        self.assertIn("按主题覆盖频率排序的书签", question_bank_html)
-        self.assertIn("覆盖 2 / 2 场", question_bank_html)
-        self.assertIn("主题仍按覆盖的面试场次数排序", question_bank_html)
-        self.assertEqual(question_bank_html.count("此说明只展示一次"), 1)
-        self.assertNotIn("查看练习方法", question_bank_html)
-        self.assertIn("2 份跨场成熟答案", question_bank_html)
-        self.assertIn("相关跨场成熟答案（2 份）", question_bank_html)
-        self.assertIn("查看：缓存顺序的备选答法", question_bank_html)
-        self.assertIn("缓存顺序标准答法", question_bank_html)
-        self.assertIn("30 秒版", question_bank_html)
-        self.assertIn("2 分钟版", question_bank_html)
-        self.assertIn("常见追问", question_bank_html)
-        self.assertIn("待补证据", question_bank_html)
-        self.assertIn("待确认", question_bank_html)
-        self.assertIn("data-standard-answer", question_bank_html)
-        self.assertIn("https://example.com/cache", question_bank_html)
-        self.assertNotIn("javascript:alert(1)", question_bank_html)
-        self.assertIn(f'interview-review.html#practice-q-002', question_bank_html)
-        self.assertIn("1 组跨场高频问法", question_bank_html)
-        self.assertIn("高频重复问法", question_bank_html)
-        self.assertIn("项目介绍与职责", question_bank_html)
-        self.assertIn("覆盖 2 场 · 2 道真实问题", question_bank_html)
-        self.assertIn("AI 归并 · 待确认", question_bank_html)
-        self.assertIn("data-question-cluster", question_bank_html)
-        self.assertIn("跨场高频重复问法", question_bank_html)
-        self.assertIn("确认方式", question_bank_html)
-        self.assertIn('id="review-center"', question_bank_html)
-        self.assertIn("事实与答案确认中心", question_bank_html)
-        self.assertIn("data-export-actions", question_bank_html)
-        self.assertIn("data-review-status=\"confirmed\"", question_bank_html)
-        self.assertIn("data-edit-short", question_bank_html)
-        self.assertIn("data-practice-widget", question_bank_html)
-        self.assertIn("脱稿练习并记录", question_bank_html)
+        self.assertIn("data-interview-pending-review", pending_review_html)
+        self.assertIn("题库已并入面试总览", question_bank_html)
+        self.assertIn('href="interview-history.html#question-bank"', question_bank_html)
+        for marker in (
+            "全部面试题", "我的现场回答", "推荐答案", "为什么选择这个顺序",
+            "data-question-search", "data-question-row", 'class="bank-sidebar"',
+            "搜索与书签", "按主题覆盖频率排序的书签", "覆盖 2 / 2 场",
+            "主题仍按覆盖的面试场次数排序", "此说明只展示一次", "2 份跨场成熟答案",
+            "相关跨场成熟答案（2 份）", "查看：缓存顺序的备选答法", "缓存顺序标准答法",
+            "30 秒版", "2 分钟版", "常见追问", "待补证据", "待确认",
+            "data-standard-answer", "https://example.com/cache", "1 组跨场高频问法",
+            "高频重复问法", "项目介绍与职责", "覆盖 2 场 · 2 道真实问题",
+            "AI 归并 · 待确认", "data-question-cluster", "跨场高频重复问法",
+            "待确认内容已单独整理",
+        ):
+            self.assertIn(marker, history_html)
+        self.assertNotIn("javascript:alert(1)", history_html)
+        self.assertIn(f'interview-review.html#practice-q-002', history_html)
+        self.assertNotIn('id="review-center"', question_bank_html)
+        self.assertNotIn('<button type="button" data-export-actions', question_bank_html)
+        self.assertNotIn("data-review-status=\"confirmed\"", question_bank_html)
+        self.assertIn('id="review-center"', pending_review_html)
+        self.assertIn("事实与答案确认中心", pending_review_html)
+        self.assertIn("本轮只确认最高频的", pending_review_html)
+        self.assertIn('id="priority-review"', pending_review_html)
+        self.assertIn("先确认最高频的", pending_review_html)
+        self.assertIn("确认这些问题是否属于同一类", pending_review_html)
+        self.assertIn("暂时不用审核答案内容", pending_review_html)
+        self.assertIn(
+            f'href="interview-history.html#practice-{result["case_id"]}-q-001"',
+            pending_review_html,
+        )
+        self.assertNotIn(
+            f'href="#practice-{result["case_id"]}-q-001"',
+            pending_review_html,
+        )
+        self.assertIn('class="pending-backlog"', pending_review_html)
+        self.assertIn("本轮可跳过", pending_review_html)
+        self.assertIn("AI 给你的复习提醒", pending_review_html)
+        self.assertIn("哪些知识点可能要复习、哪些回答容易被追问", pending_review_html)
+        self.assertIn("data-export-actions", pending_review_html)
+        self.assertIn("data-review-status=\"confirmed\"", pending_review_html)
+        self.assertIn("确认正确", pending_review_html)
+        self.assertIn("暂不确定", pending_review_html)
+        self.assertIn("不应采用", pending_review_html)
+        self.assertIn("撤销选择", pending_review_html)
+        self.assertIn("第 1 步：逐项判断", pending_review_html)
+        self.assertIn("第 2 步：导出选择", pending_review_html)
+        self.assertIn("第 3 步：应用到档案", pending_review_html)
+        self.assertIn("应用刚导出的审核结果", pending_review_html)
+        self.assertIn("导出待处理结果", pending_review_html)
+        self.assertIn("高级设置：2 道问题的原始引用（一般不用修改）", pending_review_html)
+        self.assertIn('aria-pressed="false"', pending_review_html)
+        self.assertIn("data-edit-short", pending_review_html)
+        self.assertIn(r".value.split('\n')", pending_review_html)
+        self.assertNotIn(".value.split('\n')", pending_review_html)
+        self.assertIn(r"JSON.stringify(payload, null, 2) + '\n'", pending_review_html)
+        self.assertNotIn("{html.escape(note)}", pending_review_html)
+        self.assertIn("按跨场相同面试意图归并。", history_html)
+        self.assertIn("data-practice-widget", history_html)
+        self.assertIn("脱稿练习并记录", history_html)
         second_html = (second_case / "interview-review.html").read_text(encoding="utf-8")
         self.assertIn("本场未提供 JD。", second_html)
         self.assertNotIn("岗位要求：熟悉缓存一致性", second_html)

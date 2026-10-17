@@ -140,7 +140,7 @@ PDF 输入的逐页提取方法记录在 `manifest.inputs.transcript_pdf_pages` 
 
 ## HTML 派生产物
 
-`interview-review.html`、根目录 `interview-history.html` 和 `interview-question-bank.html` 不属于事实数据契约。它们必须由上述 JSON、`review.md` 和逐字稿视图重新生成，不能被读取后反向修改结构化产物。
+`interview-review.html`、根目录 `interview-history.html`、`interview-question-bank.html` 和 `interview-pending-review.html` 不属于事实数据契约。它们必须由上述 JSON、`review.md` 和逐字稿视图重新生成，不能被读取后反向修改结构化产物。
 
 ## 练习参考答案
 

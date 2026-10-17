@@ -33,7 +33,7 @@
 7. 简历表述风险。
 8. P0/P1/P2 行动清单，每项写可验证的完成条件。
 9. 拟写入长期档案的变化及状态。
-10. 默认生成离线 `interview-review.html`；逐题固定展示原始问题、候选人现场回答、回答问题（AI 判断）、推荐答案和相关文档。数据目录同时生成 `interview-history.html` 与可搜索的全量 `interview-question-bank.html`。缺少参考答案或核验来源时必须明确标注，不得自动补造。
+10. 默认生成离线 `interview-review.html`；逐题固定展示原始问题、候选人现场回答、回答问题（AI 判断）、推荐答案和相关文档。数据目录同时生成包含历史场次与题库的统一 `interview-history.html`、兼容跳转用的 `interview-question-bank.html` 与集中的 `interview-pending-review.html`。审核页每轮默认只展开最多 5 组最高频问题，先确认归类是否正确；成熟答案、能力判断和风险记录解释用途后折叠保留。缺少参考答案或核验来源时必须明确标注，不得自动补造。
 
 用户要求“每题都有参考答案”时，确定覆盖范围后，把原题答案逐题写入对应 case 的 `practice-answers.json`，重点延伸追问的答案写入私有 `profile/practice-focus.json`。技术答案先核验来源；经历题只给基于已确认材料的答题结构，未知职责或数字留“待补充”；算法题的 Java 示例须编译和运行边界测试。生成 HTML 前运行 `check_practice_answers.py --root <data-root> --scope focus|all`，只有所选范围无缺项才宣称完成。参考答案与当场回答始终分开展示。
 
