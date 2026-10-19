@@ -22,8 +22,8 @@
 - 保存后运行 `check_standard_answers.py --root <data-root>`，通过后再重建题库。
 - 高频统计分两层：主题频率只表示某领域被问及的场次；真实问法频率来自 `profile/question-clusters.json`，按相同面试意图人工或 AI 归并并绑定原题。AI 分组保持 `pending`，不得把关键词命中直接当作语义等价。
 - 用户明确确认某份成熟答案后，运行 `set_standard_answer_status.py --root <data-root> --answer-id <id> --status confirmed --reason <原因>`；脚本追加 `profile/standard-answer-revisions.jsonl`，不能直接手改状态绕过修订记录。
-- 独立待确认页 `interview-pending-review.html` 可离线排队 `standard_answer`、`question_cluster` 和 `profile_event` 操作；默认只展开最多 5 组最高频的 `question_cluster`，按覆盖场次和原题数排序。页面必须明确说明：确认高频问题是在确认组内原题是否询问同一核心问题，不是在确认答案。成熟答案是多场回答归并后的参考答法；长期档案项在页面上称为“AI 给你的复习提醒”，并说明它们是根据面试记录整理的复习、追问和简历表述提醒，不是已确认结论。每条提醒尽量同时显示原始问题、候选人现场回答和 AI 提醒；无法可靠定位时明确标注，不得编造。后二者默认折叠并说明本轮可以跳过，不能把所有 `pending` 都表述成必须立即确认的任务。题库页的练习组件继续排队 `practice_attempt`。浏览器不能直接改写事实源；导出的 JSON 必须交给 `apply_review_actions.py`，它校验页面打开时的旧状态，防止用过期页面覆盖新修订。同机使用时，用户导出后只需说“应用刚导出的审核结果”，无需手工上传文件。
-- 新场次导入后运行 `refresh_question_clusters.py`。默认只写 `profile/question-cluster-candidates.json`；`--apply-high-confidence` 也只会追加高阈值候选，并把受影响聚类降回 `pending`。
+- 独立待确认页 `interview-pending-review.html` 可离线排队 `standard_answer`、`question_cluster`、`question_cluster_create`、`profile_event` 和历史兼容的 `question_preference` 操作；自动生成的 `pending` 一律作为默认折叠的候选资料，不按固定配额制造人工待办；事实、个人贡献和简历风险候选也按需核对。AI 提醒、答案草稿和归并候选仍保留真实状态，不等于人工待确认任务。新页面不再展示或生成“练习偏好”控件；旧 `question-preferences.json` 仍被读取以维持历史排序/排除语义，历史记录不删除。题库和待确认页都可从原始题面手动创建待确认合并组。页面必须明确说明：确认高频问题是在确认组内原题是否询问同一核心问题，不是在确认答案。成熟答案是多场回答归并后的参考答法；长期档案项在页面上称为“AI 给你的复习提醒”，并说明它们是根据面试记录整理的复习、追问和简历表述提醒，不是已确认结论。每条提醒尽量同时显示原始问题、候选人现场回答和 AI 提醒；无法可靠定位时明确标注，不得编造。候选资料默认折叠并说明不影响练习，不能把所有 `pending` 都表述成必须立即确认的任务。练习区以用户现场回答、当前补充及现有参考稿生成可复制的 AI 改进请求，要求分清事实与建议；本地 HTML 不直接调用 AI。练习记录优先通过本机服务直接写入并显示“已入库 · 待审核”；服务不可连接时才下载单条 `practice_attempt` 待应用文件，并显示“已下载 · 未入库”。浏览器不能直接改写事实源；导出的 JSON 必须交给 `apply_review_actions.py`，它校验页面打开时的旧状态，防止用过期页面覆盖新修订。同机使用时，用户导出后只需在对话中说“应用刚导出的审核结果”，无需手工上传文件。
+- 新场次导入后运行 `refresh_question_clusters.py`。默认只写 `profile/question-cluster-candidates.json`，不会自动增加页面上的同题组题数。逐条核对新场次的原题与已有题组；明显同一面试意图的题，即使相似分数为 `medium`，也用 `apply_review_actions.py` 将引用加入题组并记录前后快照。`--apply-high-confidence` 只追加高阈值候选，并把受影响聚类降回 `pending`；不能用词面相似度代替人工语义核对。应用后校验题组、审计答案并重建全部 HTML，核对页面题数。题组题数与成熟答案的来源题数是两种独立统计；未审阅的新回答不自动成为已确认答案的来源。
 - 运行 `audit_standard_answers.py --reset-confirmed-stale` 对比聚类和成熟答案。新问题未被答案引用时，已确认答案回到待确认；现场回答中的数字只作为冲突线索，不自动判断真假。
 
 ## 历史分析
@@ -31,7 +31,7 @@
 - 比较重复问题、知识状态变化、经常被深挖的项目和简历表述风险。
 - 同一公司多轮单独形成趋势；不同岗位不直接比较总分。
 - 面试结果只做相关性分析，不推断单一失败原因。
-- 数据目录下的 `interview-history.html` 是面试统一总览，包含历史场次和全量真实题库；`interview-question-bank.html` 仅作为兼容入口跳回总览题库，`interview-pending-review.html` 是待确认审核入口；每场 `interview-review.html` 也必须嵌入可搜索的历史列表并链接统一总览与待确认页。
+- 数据目录下的 `interview-history.html` 是统一入口：顶部只有“练习”和“历史面试”，首页一次只展示当前题组或单场题、对应的已保存参考答案及 AI 打磨入口；跨场题组展开后，各场原题和现场回答并列可比，草稿关联须核对。用户把满意的版本交回对话保存后，可在同页切到下一条练习主题；切题不等于已掌握。优先打磨高频题的完整答案，不要求做完全部题库或填写进度条；计时与自评仍是可选记录。历史场次可展开搜索。`interview-answers.html` 汇总全部跨场、逐题及延伸追问答案；`interview-question-bank.html` 是独立完整题库，原题和长尾题默认折叠；`interview-pending-review.html` 是按需核对入口。每场 `interview-review.html` 仍嵌入可搜索的历史列表，并链接总览与按需核对页。
 - `rejected` 事件可供追溯但不得作为当前能力依据；`pending` 必须显示状态，不能与 `confirmed` 混用。
 
 ## 准备下一场

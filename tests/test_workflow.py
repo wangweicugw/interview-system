@@ -26,16 +26,24 @@ from common import read_json, read_supported_text  # noqa: E402
 from coach_runner import run_case as run_coach_case  # noqa: E402
 from ingest_audio_transcript import normalize_segments, parse_artifact  # noqa: E402
 from pdf_ocr import extract_pdf  # noqa: E402
+from refresh_question_clusters import refresh as refresh_clusters  # noqa: E402
 from render_interview_html import (  # noqa: E402
-    PRIORITY_REVIEW_LIMIT,
+    SCRIPT,
     discover_cases,
+    effective_question_preference,
     external_link,
+    home_reference_view,
+    home_answer_save_form,
+    home_related_questions,
     jd_source,
+    render_merge_builder,
     render_case,
     render_history_practice,
+    render_question_bank,
     render_profile_event_rows,
     safe_url,
     split_priority_review,
+    write_text,
 )
 
 
@@ -71,7 +79,39 @@ class WorkflowTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def test_pending_review_limits_default_workload(self) -> None:
+    def test_cluster_refresh_rejects_invalid_changes_before_writing(self) -> None:
+        for number in range(1, 4):
+            case = self.root / "interviews" / f"case-{number}"
+            case.mkdir()
+            (case / "qa-tree.json").write_text(json.dumps({
+                "case_id": f"case-{number}",
+                "questions": [{"question_id": "q-001", "question": "请做自我介绍。"}],
+            }, ensure_ascii=False), encoding="utf-8")
+        cluster_path = self.root / "profile" / "question-clusters.json"
+        cluster_path.write_text(json.dumps({"schema_version": 1, "clusters": [{
+            "cluster_id": "self-intro", "label": "自我介绍", "topic": "self-intro",
+            "status": "pending", "questions": [
+                {"case_id": "case-1", "question_id": "q-001"},
+                {"case_id": "case-2", "question_id": "q-001"},
+            ],
+        }]}, ensure_ascii=False), encoding="utf-8")
+        before = cluster_path.read_bytes()
+        with mock.patch("refresh_question_clusters.require_store_compatible"), \
+             mock.patch("refresh_question_clusters.validate_question_clusters", return_value=["模拟校验失败"]):
+            with self.assertRaisesRegex(RuntimeError, "模拟校验失败"):
+                refresh_clusters(self.root, apply_high_confidence=True)
+        self.assertEqual(cluster_path.read_bytes(), before)
+        self.assertFalse((self.root / "profile" / "question-cluster-candidates.json").exists())
+        with mock.patch("refresh_question_clusters.require_store_compatible"):
+            result = refresh_clusters(self.root, apply_high_confidence=True)
+        self.assertEqual(result["applied"], 1)
+        updated = json.loads(cluster_path.read_text(encoding="utf-8"))
+        self.assertIn(
+            {"case_id": "case-3", "question_id": "q-001"},
+            updated["clusters"][0]["questions"],
+        )
+
+    def test_generated_candidates_do_not_create_default_review_tasks(self) -> None:
         answers = [{"answer_id": "answer-1"}, {"answer_id": "answer-2"}]
         clusters = [
             {"cluster_id": f"cluster-{index}", "questions": [{}] * question_count}
@@ -83,17 +123,17 @@ class WorkflowTest(unittest.TestCase):
             {"event_id": "state-1", "type": "knowledge_state"},
         ]
 
-        priority_clusters, deferred_answers, deferred_clusters, deferred_events = (
+        priority_clusters, deferred_answers, deferred_clusters, deferred_events, priority_events = (
             split_priority_review(answers, clusters, events)
         )
 
-        self.assertEqual(len(priority_clusters), PRIORITY_REVIEW_LIMIT)
-        self.assertEqual(
-            [item["cluster_id"] for item in priority_clusters],
-            ["cluster-2", "cluster-4", "cluster-6", "cluster-5", "cluster-3"],
-        )
+        self.assertEqual(priority_clusters, [])
         self.assertEqual(deferred_answers, answers)
-        self.assertEqual([item["cluster_id"] for item in deferred_clusters], ["cluster-1"])
+        self.assertEqual(
+            [item["cluster_id"] for item in deferred_clusters],
+            ["cluster-2", "cluster-4", "cluster-6", "cluster-5", "cluster-3", "cluster-1"],
+        )
+        self.assertEqual(priority_events, [])
         self.assertEqual(deferred_events, events)
 
     def test_profile_reminder_shows_question_and_candidate_answer(self) -> None:
@@ -672,6 +712,15 @@ class WorkflowTest(unittest.TestCase):
                 "short_30s": "先定义一致性目标。",
             },
         })
+        standard_answers["answers"].append({
+            **standard_answers["answers"][0],
+            "answer_id": "project-introduction-answer",
+            "title": "项目介绍参考答法",
+            "source_questions": [
+                {"case_id": result["case_id"], "question_id": "q-001"},
+                {"case_id": second["case_id"], "question_id": "q-001"},
+            ],
+        })
         (self.root / "profile" / "standard-answers.json").write_text(
             json.dumps(standard_answers, ensure_ascii=False), encoding="utf-8"
         )
@@ -692,6 +741,65 @@ class WorkflowTest(unittest.TestCase):
         (self.root / "profile" / "question-clusters.json").write_text(
             json.dumps(question_clusters, ensure_ascii=False), encoding="utf-8"
         )
+        (self.root / "historical-reanalysis-test.html").write_text("旧版快照", encoding="utf-8")
+        related_markup, related_prompt, related_cases = home_related_questions(
+            self.root, discover_cases(self.root), result["case_id"], "q-001"
+        )
+        self.assertEqual(related_cases, 2)
+        self.assertIn("同类问题分组", related_markup)
+        self.assertIn("归在「项目介绍与职责」", related_markup)
+        self.assertIn("移出后题组将不足两道跨场原题，需整体调整题组", related_markup)
+        self.assertIn("从题库搜索，加入这个题组", related_markup)
+        self.assertIn('data-cluster-id="project-introduction"', related_markup)
+        self.assertIn('data-cluster-add-search-input', related_markup)
+        self.assertIn('data-question-id="q-002"', related_markup)
+        self.assertIn('data-cluster-add-search="', related_markup)
+        self.assertNotIn("参考答案来源题", related_markup)
+        self.assertNotIn("项目介绍参考答法", related_prompt)
+        self.assertIn("请简单介绍一下你做过的缓存项目", related_markup)
+        self.assertIn("我负责数据库中间件方案", related_markup)
+        self.assertEqual(related_markup.count('<details class="related-question">'), 2)
+        self.assertEqual(related_markup.count('class="relation-remove"'), 0)
+        self.assertIn("同题组的原题与旧回答", related_markup)
+        self.assertNotIn("其他场次的相关问法与旧回答", related_markup)
+        self.assertIn("2 场 2 题", related_markup)
+        self.assertNotIn("展开当时的完整回答", related_markup)
+        self.assertIn("我负责数据库中间件方案", related_prompt)
+        self.assertEqual(related_prompt.count("原题："), 2)
+        clusters_path = self.root / "profile" / "question-clusters.json"
+        grouped_clusters = {
+            "schema_version": 1,
+            "clusters": question_clusters["clusters"] + [{
+                "cluster_id": "other-group", "label": "另一题组", "status": "pending",
+                "questions": [
+                    {"case_id": result["case_id"], "question_id": "q-002"},
+                    {"case_id": second["case_id"], "question_id": "q-002"},
+                ],
+            }],
+        }
+        clusters_path.write_text(json.dumps(grouped_clusters, ensure_ascii=False), encoding="utf-8")
+        grouped_markup, _, _ = home_related_questions(
+            self.root, discover_cases(self.root), result["case_id"], "q-001"
+        )
+        self.assertIn("已归入「另一题组」", grouped_markup)
+        self.assertIn("查看原题组", grouped_markup)
+        self.assertNotIn('data-question-id="q-002"', grouped_markup)
+        clusters_path.write_text(
+            json.dumps({"schema_version": 1, "clusters": []}, ensure_ascii=False), encoding="utf-8"
+        )
+        self.assertEqual(
+            home_related_questions(self.root, discover_cases(self.root), result["case_id"], "q-001"),
+            ("", "", 0),
+        )
+        clusters_path.write_text(json.dumps(question_clusters, ensure_ascii=False), encoding="utf-8")
+        grouped_home = render_history_practice(self.root, discover_cases(self.root))
+        self.assertIn('<h3>项目介绍与职责</h3>', grouped_home)
+        self.assertIn('查看同题组原题与旧回答 · 2 场', grouped_home)
+        self.assertNotIn("代表原题来源", grouped_home)
+        standard_answers["answers"].pop()
+        (self.root / "profile" / "standard-answers.json").write_text(
+            json.dumps(standard_answers, ensure_ascii=False), encoding="utf-8"
+        )
 
         rendered = run_script(
             "render_interview_html.py", "--root", str(self.root), "--all"
@@ -703,13 +811,15 @@ class WorkflowTest(unittest.TestCase):
         case_html = (case_path / "interview-review.html").read_text(encoding="utf-8")
         history_html = (self.root / "interview-history.html").read_text(encoding="utf-8")
         question_bank_html = (self.root / "interview-question-bank.html").read_text(encoding="utf-8")
+        answers_html = (self.root / "interview-answers.html").read_text(encoding="utf-8")
         pending_review_html = (self.root / "interview-pending-review.html").read_text(encoding="utf-8")
         HTMLParser().feed(case_html)
         HTMLParser().feed(history_html)
         HTMLParser().feed(question_bank_html)
+        HTMLParser().feed(answers_html)
         HTMLParser().feed(pending_review_html)
         node = shutil.which("node")
-        for scripted_html in (question_bank_html, pending_review_html):
+        for scripted_html in (question_bank_html, answers_html, pending_review_html):
             script_match = re.search(r"<script>(.*?)</script>", scripted_html, re.DOTALL)
             self.assertIsNotNone(script_match)
             if node:
@@ -721,7 +831,7 @@ class WorkflowTest(unittest.TestCase):
                     check=False,
                 )
                 self.assertEqual(syntax_check.returncode, 0, syntax_check.stderr)
-        for rendered_html in (case_html, history_html, question_bank_html, pending_review_html):
+        for rendered_html in (case_html, history_html, question_bank_html, answers_html, pending_review_html):
             self.assertIn('http-equiv="Content-Security-Policy"', rendered_html)
             self.assertIn('default-src \'none\'', rendered_html)
             self.assertIn('name="referrer" content="no-referrer"', rendered_html)
@@ -729,7 +839,11 @@ class WorkflowTest(unittest.TestCase):
             self.assertNotRegex(rendered_html, r'<(?:script|img|link)[^>]+(?:src|href)="https?://')
         self.assertIn("sessionStorage", pending_review_html)
         self.assertIn("interview-system-review-actions-v2:${archiveId}", pending_review_html)
-        self.assertIn("关闭页面后保留选择（最长 30 天）", pending_review_html)
+        self.assertIn("关闭页面后保留选择（当前本机入口；服务重启换端口后不保证恢复）", pending_review_html)
+        self.assertIn('data-draft-persist', question_bank_html)
+        self.assertIn("服务重启换端口后不保证恢复", question_bank_html)
+        self.assertIn('data-action-message aria-live="polite" role="status"', pending_review_html)
+        self.assertIn("确认应用审核结果", pending_review_html)
         self.assertIn("↗ 外部资料", history_html)
         self.assertIn("隐私提醒", case_html)
         self.assertIn("<td>深入考察</td>", case_html)
@@ -757,6 +871,12 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn('原始问题：</strong>“为什么选择这个顺序？”', case_html)
         self.assertIn('我的现场回答：</strong>', case_html)
         self.assertIn('回答问题（AI 判断）：</strong>存在绝对化技术判断。', case_html)
+        q002_card = case_html.split('id="practice-q-002"', 1)[1].split('</article>', 1)[0]
+        self.assertIn('查看现场回答、AI 点评与参考答案', q002_card)
+        self.assertIn('先更新数据库，再处理缓存。', q002_card)
+        self.assertIn('href="../../interview-answers.html#standard-answer-other-standard"', q002_card)
+        self.assertLess(q002_card.index('我的现场回答'), q002_card.index('回答问题（AI 判断）'))
+        self.assertLess(q002_card.index('回答问题（AI 判断）'), q002_card.index('AI 参考答案'))
         self.assertIn('相关文档：</strong>', case_html)
         self.assertIn('提问：<a href="#s-0003">s-0003</a>', case_html)
         self.assertIn('回答：<a href="#s-0004">s-0004</a>', case_html)
@@ -765,54 +885,124 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("做一次缓存失效演练并保留日志。", case_html)
         self.assertIn('href="#s-0002"', case_html)
         self.assertLess(case_html.index('id="focus"'), case_html.index('id="jd"'))
-        self.assertIn("做缓存故障演练", history_html)
-        self.assertIn("保留日志与修复步骤", history_html)
+        self.assertIn("面试练习", history_html)
+        self.assertNotIn('id="next-prep"', history_html)
+        self.assertNotIn("data-goal-card", history_html)
         self.assertNotIn("已完成的练习", history_html)
-        self.assertLess(history_html.index('id="next-actions"'), history_html.index('id="history"'))
-        self.assertIn('先用面试问题练习', history_html)
+        self.assertLess(history_html.index('id="practice"'), history_html.index('id="history-archive"'))
+        self.assertLess(history_html.index('id="history-archive"'), history_html.index('id="history"'))
+        self.assertIn('先把这题答完整', history_html)
+        self.assertNotIn('historical-reanalysis-test.html', history_html)
+        self.assertIn('class="practice-card home-practice-card"', history_html)
+        self.assertIn('<details class="practice-context"><summary>查看原题、旧回答与参考资料</summary>', history_html)
         self.assertIn('为什么选择这个顺序', history_html)
         self.assertIn('interview-review.html#practice-q-002', history_html)
-        self.assertLess(history_html.index('id="practice"'), history_html.index('id="history"'))
         self.assertIn("data-history-row", history_html)
+        self.assertIn('data-history-result-status="missing"', history_html)
+        self.assertIn('data-history-result-filter', history_html)
+        self.assertIn('data-search-clear', history_html)
+        self.assertIn('aria-live="polite"', history_html)
+        self.assertIn("轮次：", history_html)
+        self.assertIn("结果：尚未记录结果", history_html)
+        for rendered_html in (case_html, history_html, question_bank_html, pending_review_html):
+            self.assertNotIn("练习偏好", rendered_html)
+            self.assertNotIn("data-preference-choice", rendered_html)
         self.assertIn('id="history"', case_html)
         self.assertIn("示例公司", history_html)
         self.assertIn("第二家公司", case_html)
         self.assertIn("第二家公司", history_html)
-        self.assertIn('id="question-bank"', history_html)
+        self.assertNotIn('id="question-bank"', history_html)
         self.assertIn("面试总览", history_html)
         self.assertIn('href="interview-pending-review.html"', history_html)
-        self.assertIn('href="../../interview-pending-review.html"', case_html)
+        home_nav = history_html.split('<nav class="topnav" aria-label="本页导航">', 1)[1].split('</nav>', 1)[0]
+        self.assertEqual(home_nav.count('<a href='), 2)
+        self.assertIn('<a href="#practice">练习</a>', home_nav)
+        self.assertIn('<a href="#history-archive">历史面试</a>', home_nav)
+        self.assertIn('<a href="interview-question-bank.html">打开完整题库</a>', history_html)
+        self.assertIn('data-ai-reference hidden', history_html)
+        self.assertNotIn('id="saved-answers"', history_html)
+        reference_markup, reference_prompt = home_reference_view({}, [standard_answers["answers"][0]])
+        self.assertIn('先更新数据库，再处理缓存。', reference_markup)
+        self.assertIn('href="interview-answers.html#standard-answer-other-standard"', reference_markup)
+        self.assertIn('未核对草稿', reference_markup)
+        self.assertIn('先更新数据库，再处理缓存。', reference_prompt)
+        blank_title_markup, _ = home_reference_view({}, [{
+            "answer_id": "blank-title", "title": "   ", "status": "pending",
+            "versions": {"short_30s": "短答", "standard_2m": "长答"},
+        }])
+        self.assertIn("跨场参考答案（标题未记录）", blank_title_markup)
+        self.assertIn('data-interview-answers', answers_html)
+        self.assertIn('data-answer-search', answers_html)
+        self.assertIn('data-search-clear', answers_html)
+        self.assertIn('aria-live="polite"', answers_html)
+        self.assertIn('id="cross-case-answers"', answers_html)
+        self.assertIn('id="question-answers"', answers_html)
+        self.assertEqual(answers_html.count('class="standard-answer"'), 2)
+        self.assertIn('id="standard-answer-other-standard"', answers_html)
+        self.assertIn('id="standard-answer-other-standard-second"', answers_html)
+        self.assertIn('>本场练习</a>', case_html)
+        self.assertIn('>原始材料</a>', case_html)
+        self.assertNotIn('>按需核对</a>', case_html)
         self.assertIn("data-interview-question-bank", question_bank_html)
         self.assertIn("data-interview-pending-review", pending_review_html)
-        self.assertIn("题库已并入面试总览", question_bank_html)
-        self.assertIn('href="interview-history.html#question-bank"', question_bank_html)
+        self.assertIn("完整面试题库", question_bank_html)
+        self.assertIn("查看全部原题与长尾题", question_bank_html)
+        self.assertIn('href="interview-history.html"', question_bank_html)
+        self.assertIn('href="interview-answers.html"', question_bank_html)
         for marker in (
             "全部面试题", "我的现场回答", "推荐答案", "为什么选择这个顺序",
             "data-question-search", "data-question-row", 'class="bank-sidebar"',
             "搜索与书签", "按主题覆盖频率排序的书签", "覆盖 2 / 2 场",
-            "主题仍按覆盖的面试场次数排序", "此说明只展示一次", "2 份跨场成熟答案",
-            "相关跨场成熟答案（2 份）", "查看：缓存顺序的备选答法", "缓存顺序标准答法",
-            "30 秒版", "2 分钟版", "常见追问", "待补证据", "待确认",
+            "主题仍按覆盖的面试场次数排序", "先写自己的版本，再用 AI 打磨", "2 份跨场参考答案",
+            "相关跨场参考答案（2 份）", "缓存顺序的备选答法", "缓存顺序标准答法",
+            "30 秒版", "展开 2 分钟版", "常见追问", "待补证据", "未核对草稿",
             "data-standard-answer", "https://example.com/cache", "1 组跨场高频问法",
             "高频重复问法", "项目介绍与职责", "覆盖 2 场 · 2 道真实问题",
-            "AI 归并 · 待确认", "data-question-cluster", "跨场高频重复问法",
-            "待确认内容已单独整理",
+            "AI 归并 · 未核对", "data-question-cluster", "跨场高频重复问法",
+            'data-standard-library',
         ):
-            self.assertIn(marker, history_html)
+            self.assertIn(marker, question_bank_html)
+        self.assertIn('data-search-clear', question_bank_html)
+        self.assertIn('data-draft-key="supplement:', question_bank_html)
+        self.assertIn('清除补充草稿', question_bank_html)
+        self.assertIn('interview-system-session-draft-v1:${archiveId}', question_bank_html)
+        self.assertIn('有未保存修改，请核对事实后点击保存。', question_bank_html)
+        draft_form = home_answer_save_form({}, [{
+            "answer_id": "draft-answer", "versions": {"short_30s": "短答", "standard_2m": "长答"},
+        }])
+        self.assertIn('data-draft-key="answer:standard:draft-answer"', draft_form)
+        self.assertIn("保存并确认到档案", draft_form)
+        self.assertNotIn('data-draft-persist', draft_form)
+        self.assertNotIn('data-draft-clear', draft_form)
+        self.assertEqual(question_bank_html.count('id="standard-answer-other-standard"'), 1)
+        self.assertEqual(question_bank_html.count('id="standard-answer-other-standard-second"'), 1)
+        self.assertIn('href="#standard-answer-other-standard"', question_bank_html)
+        self.assertIn('href="#standard-answer-other-standard-second"', question_bank_html)
+        self.assertIn('<summary class="standard-heading">', question_bank_html)
+        self.assertIn('其中 2 份是未核对草稿，可先用于练习', question_bank_html)
+        self.assertIn("需要纠错时再核对资料", history_html)
         self.assertNotIn("javascript:alert(1)", history_html)
         self.assertIn(f'interview-review.html#practice-q-002', history_html)
         self.assertNotIn('id="review-center"', question_bank_html)
+        self.assertIn('data-practice-save>保存本次练习', question_bank_html)
+        self.assertIn('已入库 · 待审核', question_bank_html)
+        self.assertIn('data-ai-improve>复制给 AI 打磨答案', question_bank_html)
+        self.assertIn('data-ai-past-answer hidden', question_bank_html)
+        self.assertIn('data-ai-prompt-preview hidden readonly', question_bank_html)
+        self.assertIn('需要时记录一次练习', question_bank_html)
+        self.assertIn('不要编造职责、数据、事故和项目结果', question_bank_html)
+        self.assertIn('服务暂时不可用时，才下载“待应用”文件', question_bank_html)
+        self.assertNotIn('window.confirm(', question_bank_html)
         self.assertNotIn('<button type="button" data-export-actions', question_bank_html)
         self.assertNotIn("data-review-status=\"confirmed\"", question_bank_html)
         self.assertIn('id="review-center"', pending_review_html)
-        self.assertIn("事实与答案确认中心", pending_review_html)
-        self.assertIn("本轮只确认最高频的", pending_review_html)
-        self.assertIn('id="priority-review"', pending_review_html)
-        self.assertIn("先确认最高频的", pending_review_html)
+        self.assertIn("按需核对资料", pending_review_html)
+        self.assertIn("这些内容是自动整理的候选资料，不是今天的待办", pending_review_html)
+        self.assertNotIn('id="priority-review"', pending_review_html)
+        self.assertNotIn("当前先确认", pending_review_html)
         self.assertIn("确认这些问题是否属于同一类", pending_review_html)
-        self.assertIn("暂时不用审核答案内容", pending_review_html)
         self.assertIn(
-            f'href="interview-history.html#practice-{result["case_id"]}-q-001"',
+            f'href="interview-question-bank.html#practice-{result["case_id"]}-q-001"',
             pending_review_html,
         )
         self.assertNotIn(
@@ -820,7 +1010,7 @@ class WorkflowTest(unittest.TestCase):
             pending_review_html,
         )
         self.assertIn('class="pending-backlog"', pending_review_html)
-        self.assertIn("本轮可跳过", pending_review_html)
+        self.assertIn("本轮可以先跳过", pending_review_html)
         self.assertIn("AI 给你的复习提醒", pending_review_html)
         self.assertIn("哪些知识点可能要复习、哪些回答容易被追问", pending_review_html)
         self.assertIn("data-export-actions", pending_review_html)
@@ -829,11 +1019,11 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("暂不确定", pending_review_html)
         self.assertIn("不应采用", pending_review_html)
         self.assertIn("撤销选择", pending_review_html)
-        self.assertIn("第 1 步：逐项判断", pending_review_html)
-        self.assertIn("第 2 步：导出选择", pending_review_html)
-        self.assertIn("第 3 步：应用到档案", pending_review_html)
+        self.assertNotIn("第 1 步：逐项判断", pending_review_html)
+        self.assertIn('data-review-toolbar hidden', pending_review_html)
+        self.assertIn('<details class="review-more"><summary>更多操作</summary>', pending_review_html)
         self.assertIn("应用刚导出的审核结果", pending_review_html)
-        self.assertIn("导出待处理结果", pending_review_html)
+        self.assertIn("下载选择", pending_review_html)
         self.assertIn("高级设置：2 道问题的原始引用（一般不用修改）", pending_review_html)
         self.assertIn('aria-pressed="false"', pending_review_html)
         self.assertIn("data-edit-short", pending_review_html)
@@ -841,9 +1031,10 @@ class WorkflowTest(unittest.TestCase):
         self.assertNotIn(".value.split('\n')", pending_review_html)
         self.assertIn(r"JSON.stringify(payload, null, 2) + '\n'", pending_review_html)
         self.assertNotIn("{html.escape(note)}", pending_review_html)
-        self.assertIn("按跨场相同面试意图归并。", history_html)
+        self.assertIn("按跨场相同面试意图归并。", question_bank_html)
         self.assertIn("data-practice-widget", history_html)
-        self.assertIn("脱稿练习并记录", history_html)
+        self.assertIn("和 AI 一起打磨回答", history_html)
+        self.assertIn("需要时记录一次练习", history_html)
         second_html = (second_case / "interview-review.html").read_text(encoding="utf-8")
         self.assertIn("本场未提供 JD。", second_html)
         self.assertNotIn("岗位要求：熟悉缓存一致性", second_html)
@@ -865,8 +1056,10 @@ class WorkflowTest(unittest.TestCase):
         (self.root / "profile" / "practice-focus.json").write_text(
             json.dumps(focus, ensure_ascii=False), encoding="utf-8"
         )
-        focused = render_history_practice(self.root, discover_cases(self.root))
-        self.assertIn("T01 故障排查", focused)
+        focused = render_history_practice(
+            self.root,
+            [next(item for item in discover_cases(self.root) if item["case_id"] == result["case_id"])],
+        )
         self.assertIn("为什么选择这个顺序", focused)
         self.assertIn("练习知识点：</strong>缓存一致性", focused)
 
@@ -879,10 +1072,11 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("if (a &lt; b) return;", focused)
         self.assertIn('href="https://example.com/official/cache"', focused)
         self.assertNotIn("javascript:alert", focused)
-        self.assertEqual(focused.count('class="practice-card"'), 1)
+        self.assertEqual(focused.count('class="practice-card home-practice-card"'), 1)
         focused_case = render_case(next(item for item in discover_cases(self.root)
                                         if item["case_id"] == result["case_id"]), discover_cases(self.root))
         self.assertIn("更新失败时如何补偿？", focused_case)
+        self.assertIn('本题逐题稿', focused_case)
 
         main_answer = focus["groups"][0]["questions"][0].pop("reference_answer")
         (case_path / "practice-answers.json").write_text(
@@ -893,7 +1087,14 @@ class WorkflowTest(unittest.TestCase):
         (self.root / "profile" / "practice-focus.json").write_text(
             json.dumps(focus, ensure_ascii=False), encoding="utf-8"
         )
-        self.assertIn("核对 &lt;旧数据&gt;", render_history_practice(self.root, discover_cases(self.root)))
+        self.assertIn(
+            "核对 &lt;旧数据&gt;",
+            render_case(
+                next(item for item in discover_cases(self.root)
+                     if item["case_id"] == result["case_id"]),
+                discover_cases(self.root),
+            ),
+        )
 
         coverage = run_script("check_practice_answers.py", "--root", str(self.root), "--scope", "focus")
         self.assertEqual((coverage["main_questions"], coverage["followup_questions"]), (1, 2))
@@ -919,6 +1120,34 @@ class WorkflowTest(unittest.TestCase):
             "presentation",
         )
         self.assertEqual(presentation["status"], "valid")
+
+        standard_answers["answers"].append({
+            **standard_answers["answers"][0],
+            "answer_id": "project-introduction-answer",
+            "title": "跨场项目介绍",
+            "source_questions": [
+                {"case_id": result["case_id"], "question_id": "q-001"},
+                {"case_id": second["case_id"], "question_id": "q-001"},
+            ],
+        })
+        (self.root / "profile" / "standard-answers.json").write_text(
+            json.dumps(standard_answers, ensure_ascii=False), encoding="utf-8"
+        )
+        next_markup = render_history_practice(self.root, discover_cases(self.root))
+        self.assertEqual(next_markup.count("data-home-question data-question-title="), 2)
+        self.assertIn("data-home-next", next_markup)
+        self.assertIn("data-home-previous", next_markup)
+        self.assertIn("data-home-position", next_markup)
+        self.assertIn("第 1 / 2 题", next_markup)
+        self.assertIn("下一题", next_markup)
+        self.assertIn("换题只切换页面，不代表这题已经掌握", next_markup)
+
+    def test_render_write_cleans_temporary_file_when_replace_fails(self) -> None:
+        target = self.root / "rendered.html"
+        with mock.patch("render_interview_html.os.replace", side_effect=OSError("simulated replace failure")):
+            with self.assertRaises(OSError):
+                write_text(target, "fictional html")
+        self.assertFalse(list(self.root.glob("tmp*")))
 
     def test_standard_answers_validate_real_question_references(self) -> None:
         result, case_path = self.ingest()
@@ -1120,6 +1349,229 @@ class WorkflowTest(unittest.TestCase):
         cluster_revisions = (self.root / "profile" / "question-cluster-revisions.jsonl").read_text(encoding="utf-8")
         self.assertIn('"before":', cluster_revisions)
         self.assertIn('"after":', cluster_revisions)
+
+    def test_manual_cluster_merge_validates_overlap_and_keeps_history(self) -> None:
+        first, first_path = self.ingest()
+        second_source = Path(self.temp.name) / "manual-second-interview.md"
+        second_source.write_text(
+            (FIXTURES / "interview.md").read_text(encoding="utf-8") + "\n面试官：请补充第二场项目边界。\n",
+            encoding="utf-8",
+        )
+        second = run_script(
+            "ingest_transcript.py", "--root", str(self.root), "--transcript", str(second_source),
+            "--company", "第二家公司", "--role", "后端工程师", "--round", "二面", "--date", "2026-09-29",
+            "--jd", str(FIXTURES / "jd.txt"), "--resume", str(FIXTURES / "resume.txt"),
+        )
+        second_path = Path(second["case_path"])
+        self.write_analysis(first_path, first["case_id"])
+        self.write_analysis(second_path, second["case_id"])
+        refs_q1 = [
+            {"case_id": first["case_id"], "question_id": "q-001"},
+            {"case_id": second["case_id"], "question_id": "q-001"},
+        ]
+        refs_q2 = [
+            {"case_id": first["case_id"], "question_id": "q-002"},
+            {"case_id": second["case_id"], "question_id": "q-002"},
+        ]
+        (self.root / "profile" / "question-clusters.json").write_text(json.dumps({
+            "schema_version": 1,
+            "clusters": [{
+                "cluster_id": "existing-cluster", "label": "已有题组", "topic": "project-role",
+                "status": "pending", "note": "待复核。", "questions": refs_q1,
+            }],
+        }, ensure_ascii=False), encoding="utf-8")
+
+        valid_file = Path(self.temp.name) / "manual-valid.json"
+        valid_file.write_text(json.dumps({
+            "schema_version": 1,
+            "actions": [{
+                "kind": "question_cluster_create", "id": "manual-new-cluster", "status": "pending",
+                "label": "缓存项目追问", "topic": "project-role", "reason": "两场均直接追问项目选择顺序。",
+                "questions": refs_q2,
+            }],
+        }, ensure_ascii=False), encoding="utf-8")
+        applied = run_script("apply_review_actions.py", "--root", str(self.root), "--actions", str(valid_file))
+        self.assertEqual(applied["question_clusters"], 1)
+        saved = read_json(self.root / "profile" / "question-clusters.json")["clusters"]
+        self.assertEqual(next(item for item in saved if item["cluster_id"] == "manual-new-cluster")["status"], "pending")
+        revisions = (self.root / "profile" / "question-cluster-revisions.jsonl").read_text(encoding="utf-8")
+        self.assertIn('"cluster_id": "manual-new-cluster"', revisions)
+        self.assertIn('"before": null', revisions)
+
+        refs_q3 = [
+            {"case_id": first["case_id"], "question_id": "q-003"},
+            {"case_id": second["case_id"], "question_id": "q-003"},
+        ]
+        for case_path in (first_path, second_path):
+            qa_path = case_path / "qa-tree.json"
+            qa_payload = read_json(qa_path)
+            qa_payload["questions"].append({"question_id": "q-003", "question": "如何验证项目边界"})
+            qa_path.write_text(json.dumps(qa_payload, ensure_ascii=False), encoding="utf-8")
+        before_batch_conflict = (self.root / "profile" / "question-clusters.json").read_bytes()
+        batch_conflict_file = Path(self.temp.name) / "manual-batch-conflict.json"
+        batch_conflict_file.write_text(json.dumps({
+            "schema_version": 1,
+            "actions": [
+                {"kind": "question_cluster_create", "id": "manual-batch-a", "status": "pending",
+                 "label": "批量 A", "topic": "project-role", "reason": "测试批量冲突。", "questions": refs_q3},
+                {"kind": "question_cluster_create", "id": "manual-batch-b", "status": "pending",
+                 "label": "批量 B", "topic": "project-role", "reason": "测试批量冲突。", "questions": refs_q3},
+            ],
+        }, ensure_ascii=False), encoding="utf-8")
+        batch_failed = run_script(
+            "apply_review_actions.py", "--root", str(self.root), "--actions", str(batch_conflict_file), expect=1
+        )
+        self.assertIn("同一批次", batch_failed["error"])
+        self.assertEqual((self.root / "profile" / "question-clusters.json").read_bytes(), before_batch_conflict)
+
+        before_conflict = (self.root / "profile" / "question-clusters.json").read_bytes()
+        conflict_file = Path(self.temp.name) / "manual-conflict.json"
+        conflict_file.write_text(json.dumps({
+            "schema_version": 1,
+            "actions": [{
+                "kind": "question_cluster_create", "id": "manual-conflict", "status": "pending",
+                "label": "重叠题组", "topic": "project-role", "reason": "测试重叠校验。",
+                "questions": refs_q1,
+            }],
+        }, ensure_ascii=False), encoding="utf-8")
+        failed = run_script("apply_review_actions.py", "--root", str(self.root), "--actions", str(conflict_file), expect=1)
+        self.assertIn("重叠", failed["error"])
+        self.assertEqual((self.root / "profile" / "question-clusters.json").read_bytes(), before_conflict)
+
+        merge_file = Path(self.temp.name) / "manual-supersede.json"
+        merge_file.write_text(json.dumps({
+            "schema_version": 1,
+            "actions": [{
+                "kind": "question_cluster_create", "id": "manual-merged", "status": "pending",
+                "label": "项目问题合并组", "topic": "project-role", "reason": "人工确认旧题组全部成员后合并。",
+                "supersedes": ["existing-cluster"],
+                "expected_superseded_statuses": {"existing-cluster": "pending"},
+                "questions": refs_q1,
+            }],
+        }, ensure_ascii=False), encoding="utf-8")
+        merged = run_script("apply_review_actions.py", "--root", str(self.root), "--actions", str(merge_file))
+        self.assertEqual(merged["question_clusters"], 2)
+        saved = read_json(self.root / "profile" / "question-clusters.json")["clusters"]
+        self.assertEqual(next(item for item in saved if item["cluster_id"] == "existing-cluster")["status"], "rejected")
+        self.assertEqual(next(item for item in saved if item["cluster_id"] == "manual-merged")["status"], "pending")
+        self.assertEqual(run_script("check_question_clusters.py", "--root", str(self.root))["status"], "valid")
+
+        html = render_question_bank(self.root, discover_cases(self.root))
+        self.assertIn("data-merge-builder", html)
+        self.assertIn("data-merge-undo", html)
+        self.assertIn("候选主题提示", html)
+        self.assertIn('已归入题组：<a href="#cluster-manual-merged">项目问题合并组</a>（未核对）', html)
+        pending_builder = render_merge_builder(
+            self.root, discover_cases(self.root), builder_id="pending-manual-merge"
+        )
+        self.assertIn('已归入题组：<a href="interview-question-bank.html#cluster-manual-merged">项目问题合并组</a>（未核对）', pending_builder)
+        self.assertNotIn("练习偏好", html)
+        self.assertNotIn("data-preference-choice", html)
+
+    def test_cluster_ignore_and_question_preference_override(self) -> None:
+        first, first_path = self.ingest()
+        second_source = Path(self.temp.name) / "preference-second-interview.md"
+        second_source.write_text(
+            (FIXTURES / "interview.md").read_text(encoding="utf-8") + "\n面试官：请补充第二场岗位边界。\n",
+            encoding="utf-8",
+        )
+        second = run_script(
+            "ingest_transcript.py", "--root", str(self.root), "--transcript", str(second_source),
+            "--company", "第二家公司", "--role", "后端工程师", "--round", "二面", "--date", "2026-09-29",
+            "--jd", str(FIXTURES / "jd.txt"), "--resume", str(FIXTURES / "resume.txt"),
+        )
+        second_path = Path(second["case_path"])
+        self.write_analysis(first_path, first["case_id"])
+        self.write_analysis(second_path, second["case_id"])
+        refs = [
+            {"case_id": first["case_id"], "question_id": "q-001"},
+            {"case_id": second["case_id"], "question_id": "q-001"},
+        ]
+        (self.root / "profile" / "question-clusters.json").write_text(json.dumps({
+            "schema_version": 1,
+            "clusters": [{"cluster_id": "cluster-ignore", "label": "整组测试", "topic": "project-role",
+                           "status": "pending", "note": "", "questions": refs}],
+        }, ensure_ascii=False), encoding="utf-8")
+        actions = Path(self.temp.name) / "preferences.json"
+        actions.write_text(json.dumps({
+            "schema_version": 1,
+            "actions": [
+                {"kind": "question_preference", "id": "cluster|cluster-ignore", "target_type": "cluster",
+                 "target_id": "cluster-ignore", "preference": "ignored", "reason": "整组暂不练习。"},
+                {"kind": "question_preference", "id": f"question|{first['case_id']}|q-001",
+                 "target_type": "question", "case_id": first["case_id"], "question_id": "q-001",
+                 "preference": "normal", "reason": "单题覆盖整组设置。"},
+            ],
+        }, ensure_ascii=False), encoding="utf-8")
+        run_script("apply_review_actions.py", "--root", str(self.root), "--actions", str(actions))
+        preferences = read_json(self.root / "profile" / "question-preferences.json")["preferences"]
+        preference_map = {
+            (
+                item["target_type"],
+                item.get("case_id", "") if item["target_type"] == "question" else "",
+                item.get("question_id", "") if item["target_type"] == "question" else item.get("target_id", ""),
+            ): item
+            for item in preferences
+        }
+        self.assertEqual(effective_question_preference(self.root, preference_map, first["case_id"], "q-001"), "normal")
+        self.assertEqual(effective_question_preference(self.root, preference_map, second["case_id"], "q-001"), "ignored")
+        plan = run_script("build_review_plan.py", "--root", str(self.root), "--limit", "20")
+        queue = read_json(self.root / "profile" / "review-plan.json")["queue"]
+        self.assertTrue(any(item["case_id"] == first["case_id"] and item["question_id"] == "q-001" for item in queue))
+        self.assertFalse(any(item["case_id"] == second["case_id"] and item["question_id"] == "q-001" for item in queue))
+
+    def test_cluster_review_buttons_capture_editor_patch_in_dom_like_runtime(self) -> None:
+        node_script = f"""
+const SCRIPT = {json.dumps(SCRIPT, ensure_ascii=False)};
+const sessionStorage = {{value: null, getItem() {{ return this.value; }}, setItem(_k, value) {{ this.value = value; }}, removeItem() {{ this.value = null; }}}};
+const localStorage = {{value: null, getItem() {{ return this.value; }}, setItem(_k, value) {{ this.value = value; }}, removeItem() {{ this.value = null; }}}};
+const result = {{textContent: '', classList: {{toggle() {{}} }}}};
+const fields = {{
+  '[data-edit-cluster-label]': {{value: '用户改后的题组名'}},
+  '[data-edit-cluster-note]': {{value: '用户改后的理由'}},
+  '[data-edit-cluster-questions]': {{value: '[{{"case_id":"case-a","question_id":"q-001"}},{{"case_id":"case-b","question_id":"q-001"}}]'}},
+}};
+const cluster = {{dataset: {{}}, querySelector(selector) {{ return selector === '[data-review-result]' ? result : (fields[selector] || null); }}}};
+let buttons = [];
+const item = {{
+  dataset: {{reviewKind: 'question_cluster', reviewId: 'cluster-a', reviewCurrent: 'pending'}},
+  querySelectorAll(selector) {{ return selector === '[data-review-status]' ? buttons : []; }},
+  querySelector() {{ return null; }},
+  closest(selector) {{ return selector === '.answer-editor' ? null : (selector === '[data-question-cluster]' ? cluster : null); }},
+}};
+function makeButton(status) {{
+  return {{dataset: {{reviewStatus: status}}, attrs: {{}}, addEventListener(_event, fn) {{ this.handler = fn; }},
+    setAttribute(key, value) {{ this.attrs[key] = value; }}, closest(selector) {{ return selector === '[data-review-item]' ? item : null; }},
+    click() {{ this.handler(); }}}};
+}}
+buttons = ['confirmed', 'pending', 'rejected'].map(makeButton);
+globalThis.sessionStorage = sessionStorage;
+globalThis.localStorage = localStorage;
+globalThis.location = {{hash: ''}};
+globalThis.window = {{prompt: () => '行为测试理由', confirm: () => true}};
+globalThis.document = {{
+  body: {{dataset: {{storeId: 'dom-test'}}}},
+  addEventListener() {{}},
+  querySelector() {{ return null; }},
+  querySelectorAll(selector) {{ return selector === '[data-review-status]' ? buttons : []; }},
+}};
+globalThis.requestAnimationFrame = fn => fn();
+eval(SCRIPT);
+for (const [index, status] of ['confirmed', 'pending', 'rejected'].entries()) {{
+  buttons[index].click();
+  const payload = JSON.parse(sessionStorage.value);
+  const action = payload.actions[payload.actions.length - 1];
+  if (action.status !== status) throw new Error(`状态未入队: ${{status}}`);
+  if (!action.patch || action.patch.label !== '用户改后的题组名' || action.patch.note !== '用户改后的理由') throw new Error('题组编辑 patch 未进入导出动作');
+  if (action.patch.questions.length !== 2) throw new Error('题组引用 patch 未进入导出动作');
+}}
+console.log('dom-review-actions-ok');
+"""
+        script_path = Path(self.temp.name) / "dom-review-actions.js"
+        script_path.write_text(node_script, encoding="utf-8")
+        result = subprocess.run(["node", str(script_path)], text=True, capture_output=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("dom-review-actions-ok", result.stdout)
 
     def test_review_actions_practice_plan_backup_and_migration(self) -> None:
         result, case_path = self.ingest()

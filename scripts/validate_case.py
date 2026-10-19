@@ -571,21 +571,21 @@ def main() -> int:
             errors.append("根目录 interview-history.html 缺失或为空")
         else:
             document = history_html.read_text(encoding="utf-8")
-            for marker in ("data-interview-history", 'id="history"', 'id="question-bank"', "我的现场回答", "推荐答案"):
+            for marker in ("data-interview-history", 'id="history"', "data-history-search", "先把这题答完整"):
                 if marker not in document:
                     errors.append(f"interview-history.html 缺少标记：{marker}")
         if not question_bank_html.is_file() or not question_bank_html.read_text(encoding="utf-8").strip():
             errors.append("根目录 interview-question-bank.html 缺失或为空")
         else:
             document = question_bank_html.read_text(encoding="utf-8")
-            for marker in ("data-interview-question-bank", "题库已并入面试总览", 'href="interview-history.html#question-bank"'):
+            for marker in ("data-interview-question-bank", 'id="question-bank"', "完整面试题库", "全部面试题", 'href="interview-history.html"'):
                 if marker not in document:
                     errors.append(f"interview-question-bank.html 缺少标记：{marker}")
         if not pending_review_html.is_file() or not pending_review_html.read_text(encoding="utf-8").strip():
             errors.append("根目录 interview-pending-review.html 缺失或为空")
         else:
             document = pending_review_html.read_text(encoding="utf-8")
-            for marker in ("data-interview-pending-review", 'id="review-center"', "导出待处理结果"):
+            for marker in ("data-interview-pending-review", 'id="review-center"', "下载选择"):
                 if marker not in document:
                     errors.append(f"interview-pending-review.html 缺少标记：{marker}")
 

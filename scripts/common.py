@@ -100,26 +100,42 @@ def write_json(path: Path, value: Any) -> None:
     if path.exists():
         read_json(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", dir=path.parent, delete=False
-    ) as handle:
-        json.dump(value, handle, ensure_ascii=False, indent=2)
-        handle.write("\n")
-        temp_name = handle.name
-    os.chmod(temp_name, 0o600)
-    os.replace(temp_name, path)
+    temp_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=path.parent, delete=False
+        ) as handle:
+            json.dump(value, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            temp_name = handle.name
+        os.chmod(temp_name, 0o600)
+        os.replace(temp_name, path)
+    finally:
+        if temp_name:
+            try:
+                os.unlink(temp_name)
+            except FileNotFoundError:
+                pass
 
 
 def write_private_text(path: Path, value: str) -> None:
     """原子写入私有文本，并确保新旧目标最终均为 0600。"""
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", dir=path.parent, delete=False
-    ) as handle:
-        handle.write(value)
-        temp_name = handle.name
-    os.chmod(temp_name, 0o600)
-    os.replace(temp_name, path)
+    temp_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=path.parent, delete=False
+        ) as handle:
+            handle.write(value)
+            temp_name = handle.name
+        os.chmod(temp_name, 0o600)
+        os.replace(temp_name, path)
+    finally:
+        if temp_name:
+            try:
+                os.unlink(temp_name)
+            except FileNotFoundError:
+                pass
 
 
 def append_private_text(path: Path, value: str) -> None:

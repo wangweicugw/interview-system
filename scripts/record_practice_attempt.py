@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,7 @@ def record_attempt(
     duration_seconds: int,
     self_rating: int,
     note: str = "",
+    attempt_id: str | None = None,
 ) -> dict[str, Any]:
     require_store_compatible(root)
     question = _question(root, case_id, question_id)
@@ -57,10 +59,46 @@ def record_attempt(
         raise RuntimeError("自评分须在 1–5 之间")
 
     os.umask(0o077)
-    attempt_id = f"practice-{uuid.uuid4().hex[:16]}"
+    if attempt_id is None:
+        attempt_id = f"practice-{uuid.uuid4().hex[:16]}"
+    elif not re.fullmatch(r"practice-[a-f0-9]{16,64}", attempt_id):
+        raise RuntimeError("练习记录编号无效，请刷新页面后重试")
     private_dir = root / "practice" / "private"
     private_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    answer_hash = sha256_text(answer + "\n")
     answer_path = private_dir / f"{attempt_id}.txt"
+    log = root / "practice" / "attempts.jsonl"
+    if attempt_id and log.is_file():
+        try:
+            existing_events = [
+                json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        except (OSError, ValueError) as error:
+            raise RuntimeError("练习记录索引无法读取，请先检查档案后重试") from error
+        existing = next(
+            (item for item in existing_events
+             if isinstance(item, dict) and item.get("attempt_id") == attempt_id),
+            None,
+        )
+        if existing is not None:
+            same_payload = (
+                existing.get("case_id") == case_id
+                and existing.get("question_id") == question_id
+                and existing.get("duration_seconds") == duration_seconds
+                and existing.get("self_rating") == self_rating
+                and existing.get("note") == note.strip()
+                and existing.get("answer_sha256") == answer_hash
+            )
+            if not same_payload:
+                raise RuntimeError("练习记录编号已存在但内容不同，请刷新页面后重试")
+            try:
+                existing_text = answer_path.read_text(encoding="utf-8")
+            except (OSError, ValueError) as error:
+                raise RuntimeError("练习记录正文缺失，请重新保存本次练习") from error
+            if sha256_text(existing_text) != existing.get("answer_sha256"):
+                raise RuntimeError("练习记录正文已损坏，请重新保存本次练习")
+            return {**existing, "deduplicated": True}
     write_private_text(answer_path, answer + "\n")
     event = {
         "schema_version": 1,
@@ -72,11 +110,10 @@ def record_attempt(
         "duration_seconds": duration_seconds,
         "self_rating": self_rating,
         "note": note.strip(),
-        "answer_sha256": sha256_text(answer + "\n"),
+        "answer_sha256": answer_hash,
         "answer_path": str(answer_path.relative_to(root)),
         "review_status": "pending",
     }
-    log = root / "practice" / "attempts.jsonl"
     append_private_text(log, json.dumps(event, ensure_ascii=False) + "\n")
     return event
 

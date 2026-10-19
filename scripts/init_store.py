@@ -45,12 +45,14 @@ def git_context(root: Path) -> tuple[Path | None, list[str]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="初始化个人面试系统数据目录")
-    parser.add_argument("--root", required=True, type=Path)
+    parser.add_argument("--root", required=True, type=Path, help="用户明确指定的私有档案绝对路径；无默认位置")
     parser.add_argument("--init-git", action="store_true")
     args = parser.parse_args()
 
     os.umask(0o077)
     requested_root = args.root.expanduser()
+    if not requested_root.is_absolute():
+        parser.error("--root 必须是用户指定的绝对路径，不会按当前工作目录推定保存位置")
     if requested_root.is_symlink():
         raise RuntimeError("数据目录不能是符号链接")
     root = requested_root.resolve()

@@ -32,6 +32,7 @@ from common import (
     write_private_text,
 )
 from ingest_transcript import store_optional_document
+from labels_zh import round_label
 
 
 SUPPORTED_TRANSCRIPTS = {".json", ".srt", ".vtt", ".txt", ".md", ".markdown"}
@@ -511,7 +512,8 @@ def main() -> int:
 
     company_component = safe_component(args.company, "未知公司")
     role_component = safe_component(args.role, "未知岗位")
-    round_component = safe_component(args.round_name, "未知轮次")
+    round_name = round_label(args.round_name)
+    round_component = safe_component(round_name, "轮次待确认")
     date_component = safe_component(args.date, str(date.today()))
     base_name = f"{date_component}-{company_component}-{role_component}-{round_component}"
     case_id = f"int-{args.date.replace('-', '')}-{audio_hash[:8]}"
@@ -580,7 +582,7 @@ def main() -> int:
             "date": args.date,
             "company": args.company,
             "role": args.role,
-            "round": args.round_name,
+            "round": round_name,
             "result": "无结果",
             "hr_feedback": None,
             "transcript_sha256": transcript_hash,

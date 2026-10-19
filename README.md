@@ -5,15 +5,13 @@
 
 许可证：[MIT](LICENSE)。本仓库的许可证不授予第三方语音模型、Python 依赖或用户面试资料的再分发权利。
 
-这是一个本地优先的面试复盘 Skill，帮你把逐字稿、JD、简历和可选录音整理成能回看、能练习、也能持续积累的面试档案。
-
-每场面试都会生成一份可追溯的复盘：原始问题、现场回答、AI 判断、推荐答案和相关资料放在一起，方便对照。历史场次、全量题库、高频问法、计时练习和复习计划集中在统一总览；需要你确认的内容则放到独立审核页，一次优先处理最多 5 组高频问题，其余内容可以以后再看。
-
-浏览器里的确认和练习记录会先导出为本地 JSON，经校验后才写回档案。项目还包含算法题陪练、本地备份与安全恢复，并只维护一套不针对特定宿主改写的发行包。完整工作规则见 [SKILL.md](SKILL.md)。
+本地优先的面试复盘 Skill。它把逐字稿、JD、简历和可选的录音整理为可追溯的单场报告与长期档案。日常统一从本机服务进入，查看与保存都用同一个网址；生成的 HTML 可离线查看，但不作为日常入口。总览页直接展示一道练习题和已保存的参考答案，顶部只保留“练习”和“历史面试”；完整题库、答案目录和按需核对资料从对应内容进入。练习时可复制请求到当前对话，核对内容后发送给 AI 打磨。另提供算法题陪练、本地资料备份与安全恢复。完整工作规则见 [SKILL.md](SKILL.md)。
 
 ## 安装与检查
 
-需要 Python 3.10 或更新版本。将本目录复制到 Codex 的 `skills/interview-system`，然后在你的环境安装基础依赖。以下命令以 macOS/Linux 为例；Windows 宿主尚未完成集成验收。
+需要 Python 3.10 或更新版本。先下载或克隆本仓库，在仓库目录安装依赖并检查；验证后再复制到 Codex 的 Skills 目录。用户已反馈在 Windows 下载并试跑成功；具体测试范围和环境尚未记录，因此这里只将基础运行列为已有试用反馈，不把录音转写、扫描件 OCR 或所有宿主集成标为已验证。
+
+macOS/Linux：
 
 ```bash
 git clone https://github.com/wangweicugw/interview-system.git
@@ -22,6 +20,18 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python scripts/doctor.py
 ```
+
+Windows PowerShell（在准备保存仓库的目录中运行；已下载时跳过前两行，直接进入目录）：
+
+```powershell
+git clone https://github.com/wangweicugw/interview-system.git
+Set-Location interview-system
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.lock
+.\.venv\Scripts\python.exe scripts\doctor.py
+```
+
+若 `py` 不可用，可用已安装的 Python 3.10+ 可执行文件替代。路径中有空格时，用引号包住路径参数；不要直接照搬文档中的 `/tmp`、`.venv/bin/python` 或 Bash 续行符 `\`。
 
 验证通过后，把该目录复制到你的 Codex Skills 目录；也可以保留克隆目录并按本机配置建立链接。不要把私有数据目录放进此仓库。
 
@@ -36,11 +46,19 @@ python3 -m venv .venv
 .venv/bin/python scripts/demo_smoke.py --root /tmp/interview-system-demo
 ```
 
-脚本只使用仓库内明确标注为虚构的材料；若目录已有内容会拒绝运行。它实际执行导入、结构化产物校验、长期档案更新和 HTML 生成，但不验证真实面试分析质量、语音识别或扫描件 OCR。输出 JSON 会给出单场复盘、历史总览和全量题库三个 HTML 的路径。
+脚本只使用仓库内明确标注为虚构的材料；若目录已有内容会拒绝运行。上面的路径仅用于演示，不是个人档案的默认保存位置。它实际执行导入、结构化产物校验、长期档案更新和 HTML 生成，但不验证真实面试分析质量、语音识别或扫描件 OCR。输出 JSON 会给出单场复盘、历史总览和全量题库三个 HTML 的路径。
+
+Windows PowerShell 演示（`--root` 须为不存在或空的目录）：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\demo_smoke.py --root "$env:TEMP\interview-system-demo"
+```
+
+演示通过后，打开输出中的 `history_html`；基础流程跑通不代表可处理录音、扫描 PDF 或已完成真实面试内容核验。
 
 ## 最小用法
 
-下面的 `<data-root>` 是你自己选择的私有数据目录，请替换为绝对路径。此目录不能放进公开仓库。
+个人面试档案没有默认保存位置。首次建档前，请自行指定一个私有目录的绝对路径，并用它替换下面所有的 `<data-root>`；未指定时不创建档案或导入真实资料。已有档案继续使用先前明确选定的目录，不会自动迁移。此目录不能放进公开仓库。
 
 ```bash
 .venv/bin/python scripts/init_store.py --root <data-root>
@@ -52,6 +70,16 @@ python3 -m venv .venv
 ```
 
 导入只建立原始证据和 case；分析报告还需按 [SKILL.md](SKILL.md) 的“文稿闭环”核验问题、评分和技术事实。
+
+### 打开面试档案
+
+在终端运行一次，`<data-root>` 必须是你已指定的私有档案绝对路径；浏览器会自动打开当前本机会话入口，查看和保存都从这里进入：
+
+```bash
+python3 scripts/local_answer_server.py --root <data-root> --open-browser
+```
+
+Windows PowerShell 用 `py -3 scripts/local_answer_server.py --root "C:\\你的私有档案目录" --open-browser`。若浏览器未自动打开，复制终端输出的本机网址。服务只绑定 `127.0.0.1`，关闭终端即停止；重启后应使用新网址，不收藏旧的令牌链接。先由 AI 打磨答案，再把选定的 30 秒版和 2 分钟版填入页面；核对事实后点击“保存并确认到档案”，每次点击成功都正式写入。编辑后需重新核对事实；看到成功提示才算写入。系统会校验旧版本、保留修订记录并重建页面；单场保存不会改动现场回答或跨场共用答案。
 
 ## 算法陪练
 

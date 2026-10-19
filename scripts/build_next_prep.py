@@ -11,7 +11,7 @@ from typing import Any
 from analysis_state import current_errors
 from check_data_compatibility import require_store_compatible
 from common import SCHEMA_VERSION, now_iso, read_json, write_json, write_private_text
-from labels_zh import label
+from labels_zh import label, round_label
 
 
 PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
@@ -233,7 +233,7 @@ def main() -> int:
             "date": manifest.get("date") or "未知日期",
             "company": manifest.get("company") or "未知公司",
             "role": manifest.get("role") or "未知岗位",
-            "round": manifest.get("round") or "未知轮次",
+            "round": round_label(manifest.get("round")),
         },
         "requirements": requirements,
         "profile": {

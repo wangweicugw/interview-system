@@ -22,6 +22,20 @@ from pdf_ocr import _ocr_image  # noqa: E402
 
 
 class ReleaseAndOcrTest(unittest.TestCase):
+    def test_init_store_requires_an_explicit_absolute_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            command = [sys.executable, str(SKILL / "scripts" / "init_store.py")]
+            missing = subprocess.run(command, cwd=temporary, text=True, capture_output=True, check=False)
+            relative = subprocess.run(
+                [*command, "--root", "private-store"],
+                cwd=temporary, text=True, capture_output=True, check=False,
+            )
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn("--root", missing.stderr)
+            self.assertNotEqual(relative.returncode, 0)
+            self.assertIn("绝对路径", relative.stderr)
+            self.assertFalse((Path(temporary) / "private-store").exists())
+
     def test_init_store_defaults_to_no_git_and_private_permissions(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "private-store"

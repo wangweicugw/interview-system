@@ -21,6 +21,7 @@ from common import (
     write_json,
     write_private_text,
 )
+from labels_zh import round_label
 
 
 def find_duplicate(root: Path, transcript_hash: str) -> Path | None:
@@ -138,8 +139,8 @@ def main() -> int:
 
     company = safe_component(args.company, "未知公司")
     role = safe_component(args.role, "未知岗位")
-    round_name = safe_component(args.round_name, "未知轮次")
-    base_name = f"{safe_component(args.date, str(date.today()))}-{company}-{role}-{round_name}"
+    round_name = round_label(args.round_name)
+    base_name = f"{safe_component(args.date, str(date.today()))}-{company}-{role}-{safe_component(round_name, '轮次待确认')}"
     case_id = f"int-{args.date.replace('-', '')}-{transcript_hash[:8]}"
     case_path = root / "interviews" / base_name
     if case_path.exists():
@@ -206,7 +207,7 @@ def main() -> int:
         "date": args.date,
         "company": args.company,
         "role": args.role,
-        "round": args.round_name,
+        "round": round_name,
         "result": "无结果",
         "hr_feedback": None,
         "transcript_sha256": transcript_hash,

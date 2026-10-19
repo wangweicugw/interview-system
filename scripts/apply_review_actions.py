@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import tempfile
 from copy import deepcopy
 from pathlib import Path
@@ -13,13 +14,16 @@ from typing import Any
 
 from check_data_compatibility import require_store_compatible
 from check_question_clusters import validate_question_clusters
-from check_standard_answers import validate_standard_answers
+from check_question_preferences import validate_question_preferences
+from check_standard_answers import TOPICS, validate_standard_answers
 from common import append_private_text, now_iso, write_json
 from profile_store import append_event, content_hash, latest_events, load_revisions, rebuild_profile
 from record_practice_attempt import _question, record_attempt
 
 
 STATUSES = {"pending", "confirmed", "rejected"}
+PREFERENCES = {"normal", "low_priority", "ignored"}
+CLUSTER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{2,80}$")
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -82,6 +86,28 @@ def _require_object_list(value: Any, fields: tuple[str, ...], label: str) -> lis
     return result
 
 
+def _preference_key(item: dict[str, Any]) -> tuple[str, str, str]:
+    target_type = str(item.get("target_type") or "")
+    if target_type == "question":
+        return target_type, str(item.get("case_id") or ""), str(item.get("question_id") or "")
+    return target_type, "", str(item.get("target_id") or item.get("id") or "")
+
+
+def _question_ref_key(ref: dict[str, Any]) -> tuple[str, str]:
+    return str(ref.get("case_id") or ""), str(ref.get("question_id") or "")
+
+
+def _active_cluster_question_refs(clusters: dict[str, dict[str, Any]]) -> set[tuple[str, str]]:
+    result: set[tuple[str, str]] = set()
+    for cluster in clusters.values():
+        if str(cluster.get("status") or "") not in {"pending", "confirmed"}:
+            continue
+        for ref in cluster.get("questions", []):
+            if isinstance(ref, dict):
+                result.add(_question_ref_key(ref))
+    return result
+
+
 def _validate_staged(root: Path, answers: dict[str, Any], clusters: dict[str, Any]) -> None:
     """Validate both curated files before either live file is replaced."""
     with tempfile.TemporaryDirectory(prefix="interview-review-") as temp_name:
@@ -97,20 +123,35 @@ def _validate_staged(root: Path, answers: dict[str, Any], clusters: dict[str, An
 
 def apply_actions(root: Path, action_file: Path) -> dict[str, Any]:
     require_store_compatible(root)
+    preference_issues = validate_question_preferences(root)
+    if preference_issues:
+        raise RuntimeError("已有题目偏好状态校验失败：" + "；".join(preference_issues))
     payload = _load(action_file)
     answers_path = root / "profile" / "standard-answers.json"
     clusters_path = root / "profile" / "question-clusters.json"
+    preferences_path = root / "profile" / "question-preferences.json"
     answers_payload = json.loads(answers_path.read_text(encoding="utf-8")) if answers_path.is_file() else {"schema_version": 1, "answers": []}
     clusters_payload = json.loads(clusters_path.read_text(encoding="utf-8")) if clusters_path.is_file() else {"schema_version": 1, "clusters": []}
+    preferences_payload = json.loads(preferences_path.read_text(encoding="utf-8")) if preferences_path.is_file() else {"schema_version": 1, "preferences": []}
+    if not isinstance(preferences_payload, dict) or preferences_payload.get("schema_version") != 1 or not isinstance(preferences_payload.get("preferences"), list):
+        raise RuntimeError("question-preferences.json 格式无效")
     answers_copy = deepcopy(answers_payload)
     clusters_copy = deepcopy(clusters_payload)
+    preferences_copy = deepcopy(preferences_payload)
     answers = _index(answers_copy.get("answers", []), "answer_id")
     clusters = _index(clusters_copy.get("clusters", []), "cluster_id")
     answer_originals = deepcopy(answers)
     cluster_originals = deepcopy(clusters)
+    preference_items = preferences_copy["preferences"]
+    preferences = {_preference_key(item): item for item in preference_items if isinstance(item, dict)}
+    preference_originals = deepcopy(preferences)
     profile_latest = latest_events(load_revisions(root))
     normalized: list[dict[str, Any]] = []
     action_ids: set[tuple[str, str]] = set()
+    active_cluster_refs = _active_cluster_question_refs(clusters)
+    created_cluster_ids: set[str] = set()
+    created_cluster_refs: set[tuple[str, str]] = set()
+    superseded_cluster_ids: set[str] = set()
 
     for index, raw in enumerate(payload["actions"], start=1):
         if not isinstance(raw, dict):
@@ -178,6 +219,96 @@ def apply_actions(root: Path, action_file: Path) -> dict[str, Any]:
                     f"高频问法 {item_id} 的 questions",
                 )
             normalized.append(action)
+        elif kind == "question_cluster_create":
+            item_id = _require_text(action.get("id"), f"actions[{index}].id")
+            if not CLUSTER_ID_RE.fullmatch(item_id):
+                raise RuntimeError(f"actions[{index}] 的新题组 ID 格式无效")
+            if item_id in clusters or item_id in created_cluster_ids:
+                raise RuntimeError(f"新题组 ID 已存在：{item_id}")
+            if str(action.get("status") or "pending") != "pending":
+                raise RuntimeError("手动合并的新题组必须保持 pending，不能直接确认")
+            label = _require_text(action.get("label"), f"新题组 {item_id} 的 label")
+            reason = _require_text(action.get("reason"), f"新题组 {item_id} 的 reason")
+            topic = str(action.get("topic") or "other")
+            if topic not in TOPICS:
+                raise RuntimeError(f"新题组 {item_id} 的 topic 无效：{topic}")
+            questions = _require_object_list(
+                action.get("questions"), ("case_id", "question_id"),
+                f"新题组 {item_id} 的 questions",
+            )
+            if len(questions) < 2:
+                raise RuntimeError(f"新题组 {item_id} 至少需要选择两道题")
+            ref_keys = [_question_ref_key(ref) for ref in questions]
+            if len(ref_keys) != len(set(ref_keys)):
+                raise RuntimeError(f"新题组 {item_id} 的题目引用重复")
+            supersedes = action.get("supersedes", [])
+            if not isinstance(supersedes, list) or any(not isinstance(item, str) or not item.strip() for item in supersedes):
+                raise RuntimeError(f"新题组 {item_id} 的 supersedes 必须为字符串数组")
+            supersedes = [item.strip() for item in supersedes]
+            if len(supersedes) != len(set(supersedes)):
+                raise RuntimeError(f"新题组 {item_id} 的 supersedes 重复")
+            expected_superseded = action.get("expected_superseded_statuses", {})
+            if not isinstance(expected_superseded, dict):
+                raise RuntimeError(f"新题组 {item_id} 的 expected_superseded_statuses 必须为对象")
+            selected_refs = set(ref_keys)
+            for superseded_id in supersedes:
+                if superseded_id in superseded_cluster_ids:
+                    raise RuntimeError(f"新题组 {item_id} 重复合并旧题组：{superseded_id}")
+                if superseded_id in created_cluster_ids:
+                    raise RuntimeError(f"新题组 {item_id} 不能合并同一批次新建题组：{superseded_id}")
+                old = clusters.get(superseded_id)
+                if old is None:
+                    raise RuntimeError(f"新题组 {item_id} 要合并的旧题组不存在：{superseded_id}")
+                old_status = str(old.get("status") or "")
+                if old_status not in {"pending", "confirmed"}:
+                    raise RuntimeError(f"新题组 {item_id} 只能合并待确认/已确认题组：{superseded_id}")
+                expected_old = str(expected_superseded.get(superseded_id) or "")
+                if expected_old and expected_old != old_status:
+                    raise RuntimeError(f"旧题组状态已变化：{superseded_id}；请刷新页面后重试")
+                old_refs = {
+                    _question_ref_key(ref) for ref in old.get("questions", [])
+                    if isinstance(ref, dict)
+                }
+                if not old_refs.issubset(selected_refs):
+                    raise RuntimeError(f"新题组 {item_id} 只选择了旧题组 {superseded_id} 的部分成员")
+            for case_id, question_id in ref_keys:
+                if _question(root, case_id, question_id) is None:
+                    raise RuntimeError(f"新题组 {item_id} 引用不存在：{case_id}/{question_id}")
+                if (case_id, question_id) in created_cluster_refs:
+                    raise RuntimeError(f"新题组 {item_id} 与同一批次的其他新题组重叠：{case_id}/{question_id}")
+                overlapping = [
+                    cluster_id for cluster_id, cluster in clusters.items()
+                    if str(cluster.get("status") or "") in {"pending", "confirmed"}
+                    and (case_id, question_id) in {
+                        _question_ref_key(ref) for ref in cluster.get("questions", [])
+                        if isinstance(ref, dict)
+                    }
+                ]
+                if any(cluster_id not in supersedes for cluster_id in overlapping):
+                    raise RuntimeError(
+                        f"新题组 {item_id} 与现有待确认/已确认题组重叠：{case_id}/{question_id}；请先刷新并处理原题组"
+                    )
+            action["label"] = label
+            action["topic"] = topic
+            action["status"] = "pending"
+            action["questions"] = questions
+            action["supersedes"] = supersedes
+            action["expected_superseded_statuses"] = {
+                key: str(value) for key, value in expected_superseded.items()
+                if key in supersedes
+            }
+            active_cluster_refs.difference_update(
+                ref for superseded_id in supersedes
+                for ref in {
+                    _question_ref_key(item) for item in clusters[superseded_id].get("questions", [])
+                    if isinstance(item, dict)
+                }
+            )
+            active_cluster_refs.update(ref_keys)
+            created_cluster_ids.add(item_id)
+            created_cluster_refs.update(ref_keys)
+            superseded_cluster_ids.update(supersedes)
+            normalized.append(action)
         elif kind == "profile_event":
             item_id = str(action.get("id") or "")
             target = profile_latest.get(item_id)
@@ -200,6 +331,33 @@ def apply_actions(root: Path, action_file: Path) -> dict[str, Any]:
             if type(rating) is not int or not 1 <= rating <= 5:
                 raise RuntimeError(f"{case_id}/{question_id} 的自评分无效")
             normalized.append(action)
+        elif kind == "question_preference":
+            target_type = str(action.get("target_type") or "")
+            preference = str(action.get("preference") or "")
+            reason = str(action.get("reason") or "").strip()
+            if target_type not in {"question", "cluster"}:
+                raise RuntimeError(f"actions[{index}] 的题目偏好 target_type 无效")
+            if preference not in PREFERENCES:
+                raise RuntimeError(f"actions[{index}] 的题目偏好无效：{preference or '空'}")
+            if not reason:
+                raise RuntimeError(f"actions[{index}] 的题目偏好缺少修订原因")
+            if target_type == "question":
+                case_id = str(action.get("case_id") or "")
+                question_id = str(action.get("question_id") or "")
+                if _question(root, case_id, question_id) is None:
+                    raise RuntimeError(f"找不到真实问题：{case_id}/{question_id}")
+                key = (target_type, case_id, question_id)
+            else:
+                target_id = str(action.get("target_id") or action.get("id") or "")
+                if target_id not in clusters:
+                    raise RuntimeError(f"找不到题目分组：{target_id}")
+                key = (target_type, "", target_id)
+            current = preferences.get(key, {"preference": "normal"})
+            expected = str(action.get("expected_preference") or "")
+            if expected and str(current.get("preference") or "normal") != expected:
+                raise RuntimeError(f"题目偏好已变化：操作基于 {expected}，当前为 {current.get('preference', 'normal')}；请刷新页面后重试")
+            action["_preference_key"] = list(key)
+            normalized.append(action)
         else:
             raise RuntimeError(f"actions[{index}] 的 kind 不受支持：{kind or '空'}")
 
@@ -208,6 +366,7 @@ def apply_actions(root: Path, action_file: Path) -> dict[str, Any]:
     cluster_revisions: list[dict[str, Any]] = []
     profile_revisions: list[dict[str, Any]] = []
     practice_events: list[dict[str, Any]] = []
+    preference_revisions: list[dict[str, Any]] = []
     for action in normalized:
         kind = action["kind"]
         if kind == "standard_answer":
@@ -244,6 +403,49 @@ def apply_actions(root: Path, action_file: Path) -> dict[str, Any]:
                 "before": before,
                 "after": deepcopy(target),
             })
+        elif kind == "question_cluster_create":
+            item_id = str(action["id"])
+            superseded_ids = [str(value) for value in action.get("supersedes", [])]
+            for superseded_id in superseded_ids:
+                old = clusters[superseded_id]
+                before = cluster_originals[superseded_id]
+                old["status"] = "rejected"
+                old["reviewed_at"] = changed_at
+                old["superseded_by"] = [item_id]
+                old["revision_reason"] = str(action["reason"]).strip()
+                cluster_revisions.append({
+                    "schema_version": 1,
+                    "cluster_id": superseded_id,
+                    "previous_status": str(before.get("status") or ""),
+                    "status": "rejected",
+                    "reason": str(action["reason"]).strip(),
+                    "changed_at": changed_at,
+                    "edited_fields": ["superseded_by", "status"],
+                    "before": before,
+                    "after": deepcopy(old),
+                })
+            target = {
+                "cluster_id": item_id,
+                "label": action["label"],
+                "topic": action["topic"],
+                "status": "pending",
+                "note": str(action.get("note") or "").strip(),
+                "questions": deepcopy(action["questions"]),
+                "created_at": changed_at,
+            }
+            clusters_copy.setdefault("clusters", []).append(target)
+            clusters[item_id] = target
+            cluster_revisions.append({
+                "schema_version": 1,
+                "cluster_id": item_id,
+                "previous_status": None,
+                "status": "pending",
+                "reason": str(action["reason"]).strip(),
+                "changed_at": changed_at,
+                "edited_fields": ["create"],
+                "before": None,
+                "after": deepcopy(target),
+            })
         elif kind == "profile_event":
             previous = profile_latest[str(action["id"])]
             event = {
@@ -257,6 +459,35 @@ def apply_actions(root: Path, action_file: Path) -> dict[str, Any]:
             profile_revisions.append(event)
         elif kind == "practice_attempt":
             practice_events.append(action)
+        elif kind == "question_preference":
+            key = tuple(action["_preference_key"])
+            before = preference_originals.get(key)
+            item = deepcopy(before) if before else {
+                "schema_version": 1,
+                "target_type": action["target_type"],
+                "case_id": str(action.get("case_id") or ""),
+                "question_id": str(action.get("question_id") or ""),
+                "target_id": str(action.get("target_id") or action.get("id") or ""),
+            }
+            item["preference"] = action["preference"]
+            item["updated_at"] = changed_at
+            item["reason"] = str(action["reason"]).strip()
+            existing_index = next((i for i, value in enumerate(preference_items) if isinstance(value, dict) and _preference_key(value) == key), None)
+            if existing_index is None:
+                preference_items.append(item)
+            else:
+                preference_items[existing_index] = item
+            preference_revisions.append({
+                "schema_version": 1,
+                "target_type": item["target_type"],
+                "case_id": item.get("case_id", ""),
+                "question_id": item.get("question_id", ""),
+                "target_id": item.get("target_id", ""),
+                "previous_preference": str((before or {}).get("preference") or "normal"),
+                "preference": item["preference"],
+                "reason": item["reason"],
+                "changed_at": changed_at,
+            })
 
     if answer_revisions or cluster_revisions:
         _validate_staged(root, answers_copy, clusters_copy)
@@ -264,11 +495,14 @@ def apply_actions(root: Path, action_file: Path) -> dict[str, Any]:
         write_json(answers_path, answers_copy)
     if cluster_revisions:
         write_json(clusters_path, clusters_copy)
+    if preference_revisions:
+        write_json(preferences_path, preferences_copy)
 
     os.umask(0o077)
     for relative, revisions in (
         ("profile/standard-answer-revisions.jsonl", answer_revisions),
         ("profile/question-cluster-revisions.jsonl", cluster_revisions),
+        ("profile/question-preference-revisions.jsonl", preference_revisions),
     ):
         if revisions:
             path = root / relative
@@ -289,12 +523,14 @@ def apply_actions(root: Path, action_file: Path) -> dict[str, Any]:
             duration_seconds=int(action["duration_seconds"]),
             self_rating=int(action["self_rating"]),
             note=str(action.get("note") or ""),
+            attempt_id=str(action.get("attempt_id") or "") or None,
         )
     return {
         "status": "applied",
         "actions": len(normalized),
         "standard_answers": len(answer_revisions),
         "question_clusters": len(cluster_revisions),
+        "question_preferences": len(preference_revisions),
         "profile_events": len(profile_revisions),
         "practice_attempts": len(practice_events),
     }

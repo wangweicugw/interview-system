@@ -59,9 +59,14 @@ def check(root: Path, scope: str) -> dict[str, Any]:
         case = by_case[case_id]
         ref = focused.get((case_id, qid), {})
         stored = case_answer_map(case["path"]).get(qid, {})
+        curated = stored.get("curated_answer")
+        versions = curated.get("versions", {}) if isinstance(curated, dict) else {}
+        curated_complete = (isinstance(versions, dict)
+                            and bool(str(versions.get("short_30s") or "").strip())
+                            and bool(str(versions.get("standard_2m") or "").strip()))
         answer = ref.get("reference_answer") or stored.get("reference_answer")
         checked_main += 1
-        if not has_answer(answer):
+        if not curated_complete and not has_answer(answer):
             errors.append(f"缺少原题参考答案：{case_id}/{qid}")
     for (case_id, qid), ref in focused.items():
         followups = ref.get("followups", [])

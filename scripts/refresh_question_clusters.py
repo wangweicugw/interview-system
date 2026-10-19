@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import re
+import tempfile
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
@@ -131,10 +132,15 @@ def refresh(root: Path, *, apply_high_confidence: bool) -> dict[str, Any]:
                 "added_questions": refs,
                 "reason": "确定性相似度达到高阈值；仍降级为待确认，避免自动把语义判断写成事实。",
             })
+        with tempfile.TemporaryDirectory(prefix="interview-cluster-refresh-") as temp_name:
+            staging = Path(temp_name)
+            (staging / "profile").mkdir()
+            os.symlink(root / "interviews", staging / "interviews", target_is_directory=True)
+            write_json(staging / "profile" / "question-clusters.json", payload)
+            issues = validate_question_clusters(staging)
+            if issues:
+                raise RuntimeError("自动追加后聚类校验失败：" + "；".join(issues))
         write_json(path, payload)
-        issues = validate_question_clusters(root)
-        if issues:
-            raise RuntimeError("自动追加后聚类校验失败：" + "；".join(issues))
         os.umask(0o077)
         log = root / "profile" / "question-cluster-revisions.jsonl"
         append_private_text(

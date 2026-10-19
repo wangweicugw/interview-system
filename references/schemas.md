@@ -146,6 +146,8 @@ PDF 输入的逐页提取方法记录在 `manifest.inputs.transcript_pdf_pages` 
 
 每场可保存私有 `practice-answers.json`：`{"schema_version":1,"questions":[{"question_id":"q-001","reference_answer":{"scope":"适用前提","steps":[{"heading":"要点","body":"具体答法"}],"validation":"验收方式","sources":[{"title":"官方资料","url":"https://..."}],"code":"可选的 Java 示例"}}]}`。`question_id` 必须来自本场 `qa-tree.json`。参考答案是学习材料，不替代 `answer_evidence`、`scores.json` 或技术 claim 核验。
 
+用户在本机页面核对并保存本题练习答案时，同一题可增加 `curated_answer: {"status":"confirmed","versions":{"short_30s":"...","standard_2m":"..."}}`。它优先于 `reference_answer` 展示，但不覆盖旧参考稿、跨场成熟答案或现场回答；完整修改前后快照追加在私有 `profile/case-answer-revisions.jsonl`。
+
 私有 `profile/practice-focus.json` 的重点题引用可附 `reference_answer` 和 `followup_answers`；后者按 `followups` 的顺序一题一答。渲染器优先使用重点题引用中的答案，其次使用单场 `practice-answers.json`。运行 `check_practice_answers.py --root <data-root> --scope focus|all` 检查所要求范围的原题与延伸追问是否全部有答案。
 
 ## 跨场成熟答案
@@ -202,6 +204,12 @@ PDF 输入的逐页提取方法记录在 `manifest.inputs.transcript_pdf_pages` 
 
 每组至少覆盖两场面试；同一道题只能进入一个主聚类，避免重复计算频率。`status` 为 `pending`、`confirmed` 或 `rejected`，AI 新建分组默认为 `pending`。被驳回分组保留修订历史但不参与题库频率。运行 `<python> <skill-dir>/scripts/check_question_clusters.py --root <data-root>` 检查引用、跨场覆盖和重复归类；文件存在但失败时 HTML 渲染器拒绝重建。
 
+私有 `profile/question-tags.json` 是题目的可解释派生标签，按题目引用保存 `domain`、`intent`、`object_scene`、`constraints` 和 `reusability`。标签只用于检索、候选和展示，不改变题目事实，也不能单独触发合并或确认；运行 `check_question_tags.py` 校验引用完整性。
+
+私有 `profile/question-preferences.json` 保存历史兼容的单题或题组独立偏好：`normal`、`low_priority`、`ignored`。偏好不删除真实题、证据、问答树或历史；`ignored` 只从默认练习和推荐队列排除，`low_priority` 只影响排序。当前展示层不再提供编辑控件，但读取、校验和旧导入仍须保持兼容。每次修改追加到 `profile/question-preference-revisions.jsonl`，运行 `check_question_preferences.py` 校验；题组偏好可继承到其引用题目。
+
+待确认中心的默认人工决策上限为每轮 3 项：最多 1 组 pending 归并判断，加最多 2 条仅当类型为 `resume_risk` 或 key 明确涉及事实冲突、个人贡献/所有权的档案候选。`answer_version`、`knowledge_state`、`interview_pattern` 和其余提醒只进入可搜索历史候选，不伪装成必须人工确认；这不改变它们的 `pending` 状态。
+
 ## 离线确认操作
 
 题库导出的操作文件为 `{"schema_version":1,"generated_at":"...","actions":[...]}`。支持：
@@ -210,6 +218,8 @@ PDF 输入的逐页提取方法记录在 `manifest.inputs.transcript_pdf_pages` 
 - `question_cluster`：包含相同的状态与原因字段，可附 `patch.label`、`patch.note` 和 `patch.questions`。
 - `profile_event`：包含相同的状态与原因字段。
 - `practice_attempt`：包含 `case_id`、`question_id`、`answer`、`duration_seconds`、`self_rating` 和可选 `note`。
+- `question_preference`：包含 `target_type`、`preference`、`reason` 和 `expected_preference`；单题还需 `case_id`、`question_id`，题组还需 `target_id`。用于低优先级、忽略和恢复，必须通过当前状态校验。
+- `question_cluster_create`：用于手动从原始题面创建题组，必须包含唯一小写短 ID、`label`、合法 `topic`、`reason`、至少两条真实 `questions`，并固定写入 `pending`。可选 `supersedes` 及其 `expected_superseded_statuses` 只在完整选择旧题组成员时使用；旧组追加为 `rejected` 并保留前后快照，部分重叠、未知引用或状态变化均拒绝写入。
 
 `apply_review_actions.py` 在任何写入前，会在临时目录同时校验成熟答案和高频分组；任一状态、字段或真实问题引用不合法时，两个正式 JSON 都不得改变。状态只能为 `pending`、`confirmed`、`rejected`。练习正文不进入结构化事实源，而是保存到 `practice/private/<attempt_id>.txt`；`practice/attempts.jsonl` 只保存题目引用、时长、自评、哈希和私有路径。
 

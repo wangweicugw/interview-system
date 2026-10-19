@@ -7,6 +7,7 @@ from pathlib import Path
 from analysis_state import mark_stale
 from check_data_compatibility import require_store_compatible
 from common import append_private_text, now_iso, read_json, sha256_text, write_json
+from labels_zh import round_label
 from profile_store import (
     append_event,
     content_hash,
@@ -87,7 +88,7 @@ def main() -> int:
         "hr_feedback": args.hr_feedback,
         "company": args.company,
         "role": args.role,
-        "round": args.round_name,
+        "round": round_label(args.round_name) if args.round_name is not None else None,
     }
     changed: dict[str, dict[str, object]] = {}
     for field, value in updates.items():
