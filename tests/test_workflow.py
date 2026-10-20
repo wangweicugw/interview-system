@@ -967,13 +967,24 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn('清除补充草稿', question_bank_html)
         self.assertIn('interview-system-session-draft-v1:${archiveId}', question_bank_html)
         self.assertIn('有未保存修改，请核对事实后点击保存。', question_bank_html)
-        draft_form = home_answer_save_form({}, [{
+        draft_answer = {
             "answer_id": "draft-answer", "versions": {"short_30s": "短答", "standard_2m": "长答"},
-        }])
+        }
+        draft_form = home_answer_save_form("case-1", "q-013", {}, [draft_answer])
         self.assertIn('data-draft-key="answer:standard:draft-answer"', draft_form)
         self.assertIn("保存并确认到档案", draft_form)
         self.assertNotIn('data-draft-persist', draft_form)
         self.assertNotIn('data-draft-clear', draft_form)
+        mixed_ref = {"reference_answer": {"steps": [{"heading": "原因", "body": "逐题参考稿"}]}}
+        mixed_view, _ = home_reference_view(mixed_ref, [draft_answer])
+        self.assertIn('data-saved-answer-kind="standard"', mixed_view)
+        self.assertNotIn("逐题参考稿", mixed_view)
+        self.assertIn('data-answer-kind="standard"',
+                      home_answer_save_form("case-1", "q-013", mixed_ref, [draft_answer]))
+        self.assertIn('data-answer-kind="case"',
+                      home_answer_save_form("case-1", "q-013", mixed_ref, []))
+        self.assertIn('data-question-id="q-013"',
+                      home_answer_save_form("case-1", "q-013", {}, []))
         self.assertEqual(question_bank_html.count('id="standard-answer-other-standard"'), 1)
         self.assertEqual(question_bank_html.count('id="standard-answer-other-standard-second"'), 1)
         self.assertIn('href="#standard-answer-other-standard"', question_bank_html)
@@ -1068,13 +1079,15 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("练习题，非面试原话", focused)
         self.assertIn("AI 整理的参考答法，非当场回答", focused)
         self.assertEqual(focused.count("查看本题参考答案"), 2)
-        self.assertIn("核对 &lt;旧数据&gt;", focused)
-        self.assertIn("if (a &lt; b) return;", focused)
+        self.assertIn('data-saved-answer-kind="standard"', focused)
+        self.assertIn('data-answer-kind="standard"', focused)
         self.assertIn('href="https://example.com/official/cache"', focused)
         self.assertNotIn("javascript:alert", focused)
         self.assertEqual(focused.count('class="practice-card home-practice-card"'), 1)
         focused_case = render_case(next(item for item in discover_cases(self.root)
                                         if item["case_id"] == result["case_id"]), discover_cases(self.root))
+        self.assertIn("核对 &lt;旧数据&gt;", focused_case)
+        self.assertIn("if (a &lt; b) return;", focused_case)
         self.assertIn("更新失败时如何补偿？", focused_case)
         self.assertIn('本题逐题稿', focused_case)
 

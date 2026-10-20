@@ -1409,20 +1409,6 @@ def home_reference_view(practice_ref: dict[str, Any], standards: list[dict[str, 
                     f'<details><summary>查看 2 分钟版</summary><p>{html.escape(full)}</p></details>'
                     '<p class="muted">这是本题专用练习答案；现场回答仍以原始记录为准。</p></section>',
                     f'30 秒版：{short}\n2 分钟版：{full}')
-    direct = practice_ref.get("reference_answer")
-    direct_html = answer_view(direct, "逐题参考答法")
-    if direct_html:
-        steps = direct.get("steps", []) if isinstance(direct, dict) else []
-        prompt = "\n".join(
-            f'{str(step.get("heading") or "").strip()}：{str(step.get("body") or "").strip()}'
-            for step in steps if isinstance(step, dict)
-        )
-        return (
-            '<section class="home-reference"><h4>已生成的参考答案</h4>'
-            + direct_html.replace('<details class="reference-answer">', '<details class="reference-answer" open>', 1)
-            + f'<p><a href="{ANSWERS_HTML}#question-answers">查看全部已保存答案 →</a></p></section>',
-            prompt,
-        )
     if standards:
         answer = standards[0]
         versions = answer.get("versions", {})
@@ -1442,25 +1428,40 @@ def home_reference_view(practice_ref: dict[str, Any], standards: list[dict[str, 
             f'<p><a href="{ANSWERS_HTML}#standard-answer-{html.escape(answer_id, quote=True)}">查看来源与追问{more} →</a></p></section>',
             f'{title}（{status}）\n30 秒版：{short_answer}\n2 分钟版：{full_answer}',
         )
+    direct = practice_ref.get("reference_answer")
+    direct_html = answer_view(direct, "逐题参考答法")
+    if direct_html:
+        steps = direct.get("steps", []) if isinstance(direct, dict) else []
+        prompt = "\n".join(
+            f'{str(step.get("heading") or "").strip()}：{str(step.get("body") or "").strip()}'
+            for step in steps if isinstance(step, dict)
+        )
+        return (
+            '<section class="home-reference"><h4>已生成的参考答案</h4>'
+            + direct_html.replace('<details class="reference-answer">', '<details class="reference-answer" open>', 1)
+            + f'<p><a href="{ANSWERS_HTML}#question-answers">查看全部已保存答案 →</a></p></section>',
+            prompt,
+        )
     return (
         '<p class="home-reference-empty">这题尚无已保存的参考答案；可先用现场回答和新想法请 AI 打磨。</p>',
         "",
     )
 
 
-def home_answer_save_form(practice_ref: dict[str, Any], standards: list[dict[str, Any]]) -> str:
-    """Offer a direct save only for the cross-case answer shown on this card."""
-    if practice_ref.get("reference_answer") or practice_ref.get("curated_answer") or not standards:
-        return ""
+def home_answer_save_form(case_id: str, question_id: str, practice_ref: dict[str, Any],
+                          standards: list[dict[str, Any]]) -> str:
+    """Save the answer displayed on the home card to its matching archive scope."""
+    if practice_ref.get("curated_answer") or not standards:
+        return case_answer_save_form(case_id, question_id, practice_ref, standards)
     answer = standards[0]
     versions = answer.get("versions", {})
     if not isinstance(versions, dict):
-        return ""
+        return case_answer_save_form(case_id, question_id, practice_ref, standards)
     answer_id = str(answer.get("answer_id") or "")
     short = str(versions.get("short_30s") or "")
     full = str(versions.get("standard_2m") or "")
     if not answer_id or not short.strip() or not full.strip():
-        return ""
+        return case_answer_save_form(case_id, question_id, practice_ref, standards)
     return (
         f'<details class="answer-confirm" data-answer-confirm data-draft-key="answer:standard:{html.escape(answer_id, quote=True)}" data-answer-kind="standard" data-answer-id="{html.escape(answer_id, quote=True)}" '
         f'data-answer-fingerprint="{answer_fingerprint(answer)}">'
@@ -1844,7 +1845,8 @@ def question_card(case: dict[str, Any], entry: dict[str, Any], segments: dict[st
     )
     practice_widget = ""
     home_reference_html, reference_for_ai = home_reference_view(practice_ref, fallback_standards or []) if home_focus else ("", "")
-    save_form = home_answer_save_form(practice_ref, fallback_standards or []) if home_focus else ""
+    save_form = home_answer_save_form(str(case["case_id"]), qid, practice_ref,
+                                      fallback_standards or []) if home_focus else ""
     ai_copy_note = (
         "复制内容含同题组各场原题与现场回答、已有参考答案和你的补充；发送前可先核对。"
         if home_grouped else
