@@ -54,6 +54,7 @@ PACKAGE_FILES = (
     "scripts/audit_standard_answers.py",
     "scripts/backup_store.py",
     "scripts/build_next_prep.py",
+    "scripts/build_pages_demo.py",
     "scripts/build_release_package.py",
     "scripts/build_review_plan.py",
     "scripts/build_question_tags.py",
