@@ -1967,45 +1967,54 @@ def home_practice_candidates(root: Path, cases: list[dict[str, Any]]) -> list[tu
     available = [(case, items) for case, items in available if items]
     if not available:
         return []
-    case, items = available[0]
-    item = items[0]
-    goals = review_plan_goals(root, 1)
-    direction = ""
-    if goals:
-        representative = goals[0].get("representative", {})
-        for candidate, candidate_items in available:
-            if str(candidate["case_id"]) != str(representative.get("case_id") or ""):
-                continue
-            matched = next((entry for entry in candidate_items
-                            if str(entry["question"].get("question_id") or "")
-                            == str(representative.get("question_id") or "")), None)
-            if matched:
-                case, item = candidate, matched
-                direction = str(goals[0].get("title") or "")
-            break
-    candidates = [(case, item, direction)]
-    selected = (str(case["case_id"]), str(item["question"].get("question_id") or ""))
     available_by_key = {
         (str(candidate["case_id"]), str(entry["question"].get("question_id") or "")): (candidate, entry)
         for candidate, entries in available for entry in entries
     }
     answer_by_question = standard_answer_question_map(root)
-    used_answer_ids = {
-        str(answer.get("answer_id") or "") for answer in answer_by_question.get(selected, [])
-    }
     preferences = question_preference_map(root)
     tags = question_tag_map(root)
+    case_answers = {str(case["case_id"]): case_answer_map(case["path"]) for case, _ in available}
+
+    def needs_answer(key: tuple[str, str]) -> bool:
+        if key not in available_by_key or effective_question_preference(root, preferences, *key) != "normal":
+            return False
+        curated = case_answers.get(key[0], {}).get(key[1], {}).get("curated_answer")
+        if isinstance(curated, dict) and curated.get("status") == "confirmed":
+            return False
+        return not any(answer.get("status") == "confirmed" for answer in answer_by_question.get(key, []))
+
+    candidates: list[tuple[dict[str, Any], dict[str, Any], str]] = []
+    used_keys: set[tuple[str, str]] = set()
+    used_answer_ids: set[str] = set()
+    for goal in review_plan_goals(root, 1000):
+        representative = goal.get("representative", {})
+        if not isinstance(representative, dict):
+            continue
+        key = (str(representative.get("case_id") or ""), str(representative.get("question_id") or ""))
+        if not needs_answer(key):
+            continue
+        case, item = available_by_key[key]
+        candidates.append((case, item, str(goal.get("title") or "")))
+        used_keys.add(key)
+        for answer in answer_by_question.get(key, []):
+            used_answer_ids.add(str(answer.get("answer_id") or ""))
+            used_keys.update(
+                (str(ref.get("case_id") or ""), str(ref.get("question_id") or ""))
+                for ref in answer.get("source_questions", []) if isinstance(ref, dict)
+            )
+        break
+
     answers = [answer for topic_answers in standard_answer_map(root).values() for answer in topic_answers]
     answers.sort(key=lambda answer: (
         -len({str(ref.get("case_id") or "") for ref in answer.get("source_questions", []) if isinstance(ref, dict)}),
         str(answer.get("title") or ""),
     ))
-    used_keys = {selected}
     for answer in answers:
         if len(candidates) >= 5:
             break
         answer_id = str(answer.get("answer_id") or "")
-        if answer_id in used_answer_ids:
+        if answer.get("status") == "confirmed" or answer_id in used_answer_ids:
             continue
         refs = answer.get("source_questions", [])
         if not isinstance(refs, list):
@@ -2014,11 +2023,10 @@ def home_practice_candidates(root: Path, cases: list[dict[str, Any]]) -> list[tu
             (str(ref.get("case_id") or ""), str(ref.get("question_id") or ""))
             for ref in refs if isinstance(ref, dict)
         ]
-        if len({key[0] for key in ref_keys}) < 2 or selected in ref_keys:
+        if len({key[0] for key in ref_keys}) < 2:
             continue
         eligible_refs = [
-            key for key in ref_keys if key in available_by_key and key not in used_keys
-            and effective_question_preference(root, preferences, *key) == "normal"
+            key for key in ref_keys if key not in used_keys and needs_answer(key)
         ]
         if not eligible_refs:
             continue
@@ -2044,13 +2052,21 @@ def home_practice_candidates(root: Path, cases: list[dict[str, Any]]) -> list[tu
         candidates.append((next_case, next_item, str(answer.get("title") or "")))
         used_keys.update(ref_keys)
         used_answer_ids.add(answer_id)
+    if not candidates:
+        for key, (case, item) in available_by_key.items():
+            if needs_answer(key):
+                candidates.append((case, item, ""))
+                break
     return candidates
 
 
 def render_history_practice(root: Path, cases: list[dict[str, Any]]) -> str:
     candidates = home_practice_candidates(root, cases)
     if not candidates:
-        return ""
+        return (f'<section id="practice"><h2>当前没有待打磨的题目</h2>'
+                f'<p>已保存的答案仍可在<a href="{ANSWERS_HTML}">答案库</a>查看；'
+                f'也可以从<a href="{QUESTION_BANK_HTML}">完整题库</a>选题继续练习。'
+                '答案已确认不代表已经掌握。</p></section>')
     focus = read_json(root / "profile" / "practice-focus.json", {})
     focus_refs: dict[tuple[str, str], dict[str, Any]] = {}
     if isinstance(focus, dict) and isinstance(focus.get("groups"), list):
@@ -2098,8 +2114,8 @@ def render_history_practice(root: Path, cases: list[dict[str, Any]]) -> str:
             + card + '</div>'
         )
     next_button = (
-        '<div class="home-next"><p>选定并保存答案后，可继续切换练习主题。'
-        '换题只切换页面，不代表这题已经掌握。</p>'
+        '<div class="home-next"><p>保存并确认的题目会在刷新后移出首页待打磨列表；'
+        '仍可在答案库和题库查看。确认答案不代表已经掌握。</p>'
         '<div class="home-navigation" aria-label="练习主题导航">'
         '<button type="button" data-home-previous disabled>上一题</button>'
         f'<span data-home-position aria-live="polite">第 1 / {len(cards)} 题</span>'

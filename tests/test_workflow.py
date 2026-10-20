@@ -34,6 +34,7 @@ from render_interview_html import (  # noqa: E402
     external_link,
     home_reference_view,
     home_answer_save_form,
+    home_practice_candidates,
     home_related_questions,
     jd_source,
     render_merge_builder,
@@ -1147,13 +1148,32 @@ class WorkflowTest(unittest.TestCase):
             json.dumps(standard_answers, ensure_ascii=False), encoding="utf-8"
         )
         next_markup = render_history_practice(self.root, discover_cases(self.root))
-        self.assertEqual(next_markup.count("data-home-question data-question-title="), 2)
+        candidate_count = len(home_practice_candidates(self.root, discover_cases(self.root)))
+        self.assertGreaterEqual(candidate_count, 1)
+        self.assertEqual(next_markup.count("data-home-question data-question-title="), candidate_count)
         self.assertIn("data-home-next", next_markup)
         self.assertIn("data-home-previous", next_markup)
         self.assertIn("data-home-position", next_markup)
-        self.assertIn("第 1 / 2 题", next_markup)
+        self.assertIn(f"第 1 / {candidate_count} 题", next_markup)
         self.assertIn("下一题", next_markup)
-        self.assertIn("换题只切换页面，不代表这题已经掌握", next_markup)
+        self.assertIn("保存并确认的题目会在刷新后移出首页待打磨列表", next_markup)
+
+        standard_answers["answers"][0]["status"] = "confirmed"
+        standard_answers["answers"][1]["status"] = "confirmed"
+        (self.root / "profile" / "standard-answers.json").write_text(
+            json.dumps(standard_answers, ensure_ascii=False), encoding="utf-8"
+        )
+        after_first_two = home_practice_candidates(self.root, discover_cases(self.root))
+        self.assertTrue(after_first_two)
+        self.assertTrue(all(item["question"]["question_id"] != "q-002"
+                            for _, item, _ in after_first_two))
+        standard_answers["answers"][2]["status"] = "confirmed"
+        (self.root / "profile" / "standard-answers.json").write_text(
+            json.dumps(standard_answers, ensure_ascii=False), encoding="utf-8"
+        )
+        after_all = render_history_practice(self.root, discover_cases(self.root))
+        self.assertNotIn('data-answer-kind="standard"', after_all)
+        self.assertIn('data-answer-kind="case"', after_all)
 
     def test_render_write_cleans_temporary_file_when_replace_fails(self) -> None:
         target = self.root / "rendered.html"
