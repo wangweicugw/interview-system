@@ -32,6 +32,7 @@ PACKAGE_FILES = (
     "references/algorithm-advanced.md",
     "references/algorithm-coach.md",
     "references/audio-and-html.md",
+    "references/company-prep.md",
     "references/fact-checking.md",
     "references/html-presentation.md",
     "references/local-audio-setup.md",
@@ -48,6 +49,7 @@ PACKAGE_FILES = (
     "scripts/algorithm_progress.py",
     "scripts/algorithm_reports.py",
     "scripts/analysis_state.py",
+    "scripts/apply_semantic_speaker_roles.py",
     "scripts/apply_review_actions.py",
     "scripts/audio_setup.py",
     "scripts/audit_question_coverage.py",
@@ -59,6 +61,7 @@ PACKAGE_FILES = (
     "scripts/build_review_plan.py",
     "scripts/build_question_tags.py",
     "scripts/check_data_compatibility.py",
+    "scripts/check_target_interview_preps.py",
     "scripts/check_practice_answers.py",
     "scripts/check_public_release.py",
     "scripts/check_question_clusters.py",
@@ -95,6 +98,7 @@ PACKAGE_FILES = (
     "scripts/sync_transcript_edits.py",
     "scripts/transcribe_local_audio.py",
     "scripts/update_case.py",
+    "scripts/upsert_target_interview_prep.py",
     "scripts/validate_case.py",
 )
 RESOURCE_ROOTS = {"agents", "assets", "references", "scripts"}

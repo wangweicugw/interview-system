@@ -102,6 +102,13 @@ def scan_store(root: Path, *, include_optional: bool = True) -> dict[str, Any]:
             for plan in sorted(plans.glob("*.json")):
                 inspect(plan)
     inspect(root / "profile" / "next-interview-prep.json")
+    inspect(root / "profile" / "target-interview-prep.json")
+    target_preps = root / "profile" / "target-interview-preps"
+    if target_preps.is_symlink():
+        report(target_preps, "目标公司准备目录不能是符号链接")
+    elif target_preps.is_dir():
+        for prep in sorted(target_preps.glob("*.json")):
+            inspect(prep)
     if include_optional:
         for name in (
             "standard-answers.json",

@@ -99,13 +99,26 @@ class LocalAnswerServerTest(unittest.TestCase):
                 self.assertEqual(len(cluster_after_remove["questions"]), 2)
                 revisions_path = root / "profile" / "question-cluster-revisions.jsonl"
                 revisions_before_invalid = revisions_path.read_bytes()
+                dissolved = handler.remove_question_relation({
+                    "relation_kind": "question_cluster", "relation_id": "demo-cluster",
+                    "relation_status": "pending", "expected_fingerprint": answer_fingerprint(cluster_after_remove),
+                    "case_id": second_case_id, "question_id": "q-001",
+                })
+                self.assertEqual(dissolved["status"], "saved")
+                self.assertTrue(dissolved["dissolved_cluster"])
+                rejected = json.loads(
+                    (root / "profile" / "question-clusters.json").read_text(encoding="utf-8")
+                )["clusters"][0]
+                self.assertEqual(rejected["status"], "rejected")
+                revisions_after_dissolve = revisions_path.read_bytes()
+                self.assertNotEqual(revisions_after_dissolve, revisions_before_invalid)
                 with self.assertRaises(ValueError):
                     handler.remove_question_relation({
                         "relation_kind": "question_cluster", "relation_id": "demo-cluster",
                         "relation_status": "pending", "expected_fingerprint": answer_fingerprint(cluster_after_remove),
                         "case_id": second_case_id, "question_id": "q-001",
                     })
-                self.assertEqual(revisions_path.read_bytes(), revisions_before_invalid)
+                self.assertEqual(revisions_path.read_bytes(), revisions_after_dissolve)
             finally:
                 server.server_close()
 

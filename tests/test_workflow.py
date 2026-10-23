@@ -22,6 +22,7 @@ SCRIPTS = SKILL / "scripts"
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 sys.path.insert(0, str(SCRIPTS))
 
+from check_target_interview_preps import validate_payload  # noqa: E402
 from common import read_json, read_supported_text  # noqa: E402
 from coach_runner import run_case as run_coach_case  # noqa: E402
 from ingest_audio_transcript import normalize_segments, parse_artifact  # noqa: E402
@@ -34,16 +35,18 @@ from render_interview_html import (  # noqa: E402
     external_link,
     home_reference_view,
     home_answer_save_form,
-    home_practice_candidates,
     home_related_questions,
     jd_source,
     render_merge_builder,
     render_case,
     render_history_practice,
+    render_interview_preparation,
+    render_interview_preparations,
     render_question_bank,
     render_profile_event_rows,
     safe_url,
     split_priority_review,
+    target_prep_evidence_href,
     write_text,
 )
 
@@ -79,6 +82,118 @@ class WorkflowTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp.cleanup()
+
+    def test_company_preparation_links_match_available_pages(self) -> None:
+        payload = {
+            "target": {"company": "虚构公司", "role": "AI 工程师"},
+            "status": "pending",
+            "questions": [{
+                "question_id": "target-q-001",
+                "source_type": "延伸练习题",
+                "priority": "P0",
+                "question": "请介绍相关项目。",
+                "short_30s": "虚构回答。",
+                "standard_2m": "虚构完整回答。",
+                "risks": [],
+                "followups": [],
+                "sources": [],
+                "evidence_refs": [],
+            }],
+            "reverse_questions": [],
+        }
+        prep_dir = self.root / "profile" / "target-interview-preps"
+        prep_dir.mkdir(parents=True, exist_ok=True)
+        (prep_dir / "fictional.json").write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
+
+        listing = render_interview_preparations(self.root)
+        detail = render_interview_preparation(self.root, {**payload, "_slug": "fictional"})
+        self.assertNotIn('href="interview-history.html"', listing)
+        self.assertNotIn('href="interview-question-bank.html"', listing)
+        self.assertNotIn('href="interview-history.html"', detail)
+        self.assertIn('href="interview-preparations.html"', detail)
+
+        result, case_path = self.ingest()
+        manifest = read_json(case_path / "manifest.json")
+        self.assertEqual(manifest["case_id"], result["case_id"])
+        listing = render_interview_preparations(self.root)
+        detail = render_interview_preparation(self.root, {**payload, "_slug": "fictional"})
+        self.assertIn('href="interview-history.html"', listing)
+        self.assertIn('href="interview-question-bank.html"', detail)
+        self.assertEqual(
+            target_prep_evidence_href(self.root, result["case_id"], "q-001"),
+            f"interviews/{case_path.name}/interview-review.html#practice-q-001",
+        )
+
+    def test_company_preparation_preserves_jd_provenance_and_escapes_text(self) -> None:
+        payload = {
+            "schema_version": 1,
+            "status": "pending",
+            "target": {"company": "虚构公司", "role": "数据库研发", "summary": "岗位摘要"},
+            "jd": {
+                "text": "职责：\n1. SQL <安全> & 稳定性",
+                "source_type": "用户截图转写",
+                "source_note": "职位名未显示，待核对截图。",
+            },
+            "questions": [{
+                "question_id": "target-q-001",
+                "source_type": "延伸练习题",
+                "priority": "P0",
+                "question": "如何设计？",
+                "short_30s": "先明确边界。",
+            }],
+        }
+        self.assertEqual(validate_payload(payload), [])
+        detail = render_interview_preparation(self.root, {**payload, "_slug": "fictional"})
+        self.assertIn('id="target-jd"', detail)
+        self.assertIn("用户截图转写", detail)
+        self.assertIn("SQL &lt;安全&gt; &amp; 稳定性", detail)
+        self.assertLess(detail.index('id="target-jd"'), detail.index('id="target-q-001"'))
+        payload["jd"]["source_type"] = "公开招聘页"
+        self.assertTrue(any("source_url" in error for error in validate_payload(payload)))
+        del payload["jd"]
+        self.assertEqual(validate_payload(payload), [])
+        self.assertIn("未保存岗位 JD 文字", render_interview_preparation(self.root, payload))
+
+    def test_company_preparation_reports_saved_data_when_rendering_fails(self) -> None:
+        _, case_path = self.ingest()
+        manifest_path = case_path / "manifest.json"
+        manifest = read_json(manifest_path)
+        manifest["analysis_status"] = "stale"
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+        source = Path(self.temp.name) / "company-prep.json"
+        source.write_text(json.dumps({
+            "schema_version": 1,
+            "status": "pending",
+            "target": {"company": "虚构公司", "role": "AI 工程师", "summary": "虚构准备稿。"},
+            "company_sources": [],
+            "questions": [{
+                "question_id": "target-q-001",
+                "source_type": "延伸练习题",
+                "priority": "P0",
+                "question": "请介绍相关项目。",
+                "short_30s": "虚构回答。",
+                "standard_2m": "虚构完整回答。",
+                "risks": [],
+                "followups": [],
+                "sources": [],
+                "evidence_refs": [],
+            }],
+            "reverse_questions": [],
+        }, ensure_ascii=False), encoding="utf-8")
+        result = run_script(
+            "upsert_target_interview_prep.py",
+            "--root", str(self.root),
+            "--slug", "fictional",
+            "--input", str(source),
+            "--render",
+            expect=2,
+        )
+        self.assertEqual(result["status"], "partial")
+        self.assertTrue(result["data_saved"])
+        self.assertFalse(result["rendered"])
+        self.assertTrue((self.root / "profile" / "target-interview-preps" / "fictional.json").is_file())
 
     def test_cluster_refresh_rejects_invalid_changes_before_writing(self) -> None:
         for number in range(1, 4):
@@ -749,7 +864,7 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(related_cases, 2)
         self.assertIn("同类问题分组", related_markup)
         self.assertIn("归在「项目介绍与职责」", related_markup)
-        self.assertIn("移出后题组将不足两道跨场原题，需整体调整题组", related_markup)
+        self.assertIn("两题题组移出任一道时，会解散整个题组", related_markup)
         self.assertIn("从题库搜索，加入这个题组", related_markup)
         self.assertIn('data-cluster-id="project-introduction"', related_markup)
         self.assertIn('data-cluster-add-search-input', related_markup)
@@ -760,7 +875,8 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("请简单介绍一下你做过的缓存项目", related_markup)
         self.assertIn("我负责数据库中间件方案", related_markup)
         self.assertEqual(related_markup.count('<details class="related-question">'), 2)
-        self.assertEqual(related_markup.count('class="relation-remove"'), 0)
+        self.assertGreaterEqual(related_markup.count('class="relation-remove"'), 1)
+        self.assertIn('data-relation-dissolves-cluster="true"', related_markup)
         self.assertIn("同题组的原题与旧回答", related_markup)
         self.assertNotIn("其他场次的相关问法与旧回答", related_markup)
         self.assertIn("2 场 2 题", related_markup)
@@ -968,24 +1084,13 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn('清除补充草稿', question_bank_html)
         self.assertIn('interview-system-session-draft-v1:${archiveId}', question_bank_html)
         self.assertIn('有未保存修改，请核对事实后点击保存。', question_bank_html)
-        draft_answer = {
+        draft_form = home_answer_save_form("case-a", "q-001", {}, [{
             "answer_id": "draft-answer", "versions": {"short_30s": "短答", "standard_2m": "长答"},
-        }
-        draft_form = home_answer_save_form("case-1", "q-013", {}, [draft_answer])
+        }])
         self.assertIn('data-draft-key="answer:standard:draft-answer"', draft_form)
         self.assertIn("保存并确认到档案", draft_form)
         self.assertNotIn('data-draft-persist', draft_form)
         self.assertNotIn('data-draft-clear', draft_form)
-        mixed_ref = {"reference_answer": {"steps": [{"heading": "原因", "body": "逐题参考稿"}]}}
-        mixed_view, _ = home_reference_view(mixed_ref, [draft_answer])
-        self.assertIn('data-saved-answer-kind="standard"', mixed_view)
-        self.assertNotIn("逐题参考稿", mixed_view)
-        self.assertIn('data-answer-kind="standard"',
-                      home_answer_save_form("case-1", "q-013", mixed_ref, [draft_answer]))
-        self.assertIn('data-answer-kind="case"',
-                      home_answer_save_form("case-1", "q-013", mixed_ref, []))
-        self.assertIn('data-question-id="q-013"',
-                      home_answer_save_form("case-1", "q-013", {}, []))
         self.assertEqual(question_bank_html.count('id="standard-answer-other-standard"'), 1)
         self.assertEqual(question_bank_html.count('id="standard-answer-other-standard-second"'), 1)
         self.assertIn('href="#standard-answer-other-standard"', question_bank_html)
@@ -1080,15 +1185,14 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("练习题，非面试原话", focused)
         self.assertIn("AI 整理的参考答法，非当场回答", focused)
         self.assertEqual(focused.count("查看本题参考答案"), 2)
+        self.assertIn("缓存顺序标准答法", focused)
         self.assertIn('data-saved-answer-kind="standard"', focused)
-        self.assertIn('data-answer-kind="standard"', focused)
+        self.assertNotIn("核对 &lt;旧数据&gt;", focused)
         self.assertIn('href="https://example.com/official/cache"', focused)
         self.assertNotIn("javascript:alert", focused)
         self.assertEqual(focused.count('class="practice-card home-practice-card"'), 1)
         focused_case = render_case(next(item for item in discover_cases(self.root)
                                         if item["case_id"] == result["case_id"]), discover_cases(self.root))
-        self.assertIn("核对 &lt;旧数据&gt;", focused_case)
-        self.assertIn("if (a &lt; b) return;", focused_case)
         self.assertIn("更新失败时如何补偿？", focused_case)
         self.assertIn('本题逐题稿', focused_case)
 
@@ -1148,32 +1252,13 @@ class WorkflowTest(unittest.TestCase):
             json.dumps(standard_answers, ensure_ascii=False), encoding="utf-8"
         )
         next_markup = render_history_practice(self.root, discover_cases(self.root))
-        candidate_count = len(home_practice_candidates(self.root, discover_cases(self.root)))
-        self.assertGreaterEqual(candidate_count, 1)
-        self.assertEqual(next_markup.count("data-home-question data-question-title="), candidate_count)
+        self.assertEqual(next_markup.count("data-home-question data-question-title="), 1)
         self.assertIn("data-home-next", next_markup)
         self.assertIn("data-home-previous", next_markup)
         self.assertIn("data-home-position", next_markup)
-        self.assertIn(f"第 1 / {candidate_count} 题", next_markup)
+        self.assertIn("第 1 / 1 题", next_markup)
         self.assertIn("下一题", next_markup)
-        self.assertIn("保存并确认的题目会在刷新后移出首页待打磨列表", next_markup)
-
-        standard_answers["answers"][0]["status"] = "confirmed"
-        standard_answers["answers"][1]["status"] = "confirmed"
-        (self.root / "profile" / "standard-answers.json").write_text(
-            json.dumps(standard_answers, ensure_ascii=False), encoding="utf-8"
-        )
-        after_first_two = home_practice_candidates(self.root, discover_cases(self.root))
-        self.assertTrue(after_first_two)
-        self.assertTrue(all(item["question"]["question_id"] != "q-002"
-                            for _, item, _ in after_first_two))
-        standard_answers["answers"][2]["status"] = "confirmed"
-        (self.root / "profile" / "standard-answers.json").write_text(
-            json.dumps(standard_answers, ensure_ascii=False), encoding="utf-8"
-        )
-        after_all = render_history_practice(self.root, discover_cases(self.root))
-        self.assertNotIn('data-answer-kind="standard"', after_all)
-        self.assertIn('data-answer-kind="case"', after_all)
+        self.assertIn("确认答案不代表已经掌握", next_markup)
 
     def test_render_write_cleans_temporary_file_when_replace_fails(self) -> None:
         target = self.root / "rendered.html"

@@ -10,6 +10,7 @@ import html
 import http.client
 import json
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -37,12 +38,15 @@ from render_interview_html import (
     CASE_HTML,
     HISTORY_HTML,
     PENDING_REVIEW_HTML,
+    PREPARATIONS_HTML,
     QUESTION_BANK_HTML,
     answer_fingerprint,
 )
 
 
-ALLOWED_ROOT_PAGES = {HISTORY_HTML, QUESTION_BANK_HTML, ANSWERS_HTML, PENDING_REVIEW_HTML}
+ALLOWED_ROOT_PAGES = {
+    HISTORY_HTML, QUESTION_BANK_HTML, ANSWERS_HTML, PENDING_REVIEW_HTML, PREPARATIONS_HTML,
+}
 PRACTICE_ENDPOINT = "/api/practice-attempts/record"
 MAX_REQUEST_BYTES = 512 * 1024
 REVIEW_ACTIONS_ENDPOINT = "/api/review-actions/apply"
@@ -322,7 +326,9 @@ class LocalAnswerHandler(BaseHTTPRequestHandler):
             return
         relative = unquote(parsed.path).lstrip("/")
         parts = Path(relative).parts
-        allowed = relative in ALLOWED_ROOT_PAGES or (
+        allowed = relative in ALLOWED_ROOT_PAGES or re.fullmatch(
+            r"interview-preparation-[a-z0-9-]+\.html", relative
+        ) is not None or (
             len(parts) == 3 and parts[0] == "interviews" and parts[-1] == CASE_HTML
         )
         if not allowed:
@@ -507,14 +513,22 @@ class LocalAnswerHandler(BaseHTTPRequestHandler):
                 raise ValueError("关联已变化，请刷新页面后重试")
             if not secrets.compare_digest(answer_fingerprint(target), expected_fingerprint):
                 raise ValueError("关联已变化，请刷新页面后重试")
-            refs = [ref for ref in target.get("questions", [])
-                    if not (isinstance(ref, dict) and str(ref.get("case_id") or "") == case_id
-                            and str(ref.get("question_id") or "") == question_id)]
+            current_refs = [ref for ref in target.get("questions", []) if isinstance(ref, dict)]
+            selected_key = (case_id, question_id)
+            if not any(
+                (str(ref.get("case_id") or ""), str(ref.get("question_id") or "")) == selected_key
+                for ref in current_refs
+            ):
+                raise ValueError("关联已变化，请刷新页面后重试")
+            refs = [ref for ref in current_refs
+                    if (str(ref.get("case_id") or ""), str(ref.get("question_id") or "")) != selected_key]
+            dissolves_cluster = len(refs) < 2 or len({str(ref.get("case_id") or "") for ref in refs}) < 2
             action = {"kind": "question_cluster", "id": relation_id,
                       "expected_status": str(target.get("status") or "pending"),
-                      "status": str(target.get("status") or "pending"),
-                      "reason": "用户在本机页面移出指定同题组关联",
-                      "patch": {"questions": refs}}
+                      "status": "rejected" if dissolves_cluster else str(target.get("status") or "pending"),
+                      "reason": ("用户在本机页面移出指定关联；剩余成员不再构成跨场题组，因此解散整组"
+                                 if dissolves_cluster else "用户在本机页面移出指定同题组关联"),
+                      "patch": {} if dissolves_cluster else {"questions": refs}}
         else:
             path = root / "profile" / "standard-answers.json"
             payload = read_json(path)
@@ -534,7 +548,10 @@ class LocalAnswerHandler(BaseHTTPRequestHandler):
                       "status": str(target.get("status") or "pending"),
                       "reason": "用户在本机页面移出指定跨场答案引用",
                       "patch": {"source_questions": refs}}
-        return self._apply_relation_action(action)
+        result = self._apply_relation_action(action)
+        if kind == "question_cluster" and dissolves_cluster:
+            result["dissolved_cluster"] = True
+        return result
 
     def add_questions_to_cluster(self, data: dict[str, object]) -> dict[str, object]:
         root = self.server.root

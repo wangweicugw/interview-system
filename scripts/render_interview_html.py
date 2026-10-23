@@ -30,6 +30,8 @@ HISTORY_HTML = "interview-history.html"
 QUESTION_BANK_HTML = "interview-question-bank.html"
 ANSWERS_HTML = "interview-answers.html"
 PENDING_REVIEW_HTML = "interview-pending-review.html"
+PREPARATIONS_HTML = "interview-preparations.html"
+PREPARATION_HTML_PREFIX = "interview-preparation-"
 
 
 def answer_fingerprint(answer: dict[str, Any]) -> str:
@@ -1524,7 +1526,7 @@ def render_cluster_membership_manager(
             f'{html.escape(item["question_id"])}</small>{original_html}</label>'
         )
     intro = (
-        '<p class="muted">可按整理后的题面或面试官原话搜索。未归组原题可勾选加入；已归组原题会标出所在题组，不能重复加入。两题题组不能只移出一道，需整体调整。</p>'
+        '<p class="muted">可按整理后的题面或面试官原话搜索。未归组原题可勾选加入；已归组原题会标出所在题组，不能重复加入。两题题组移出任一道时，会解散整个题组。</p>'
         if show_grouped else '<p class="muted">只显示题库中尚未归组的原题。选择后点击保存，直接加入当前题组。</p>'
     )
     search_label = "搜索题库原题" if show_grouped else "搜索未归组原题"
@@ -1627,22 +1629,22 @@ def home_related_questions(root: Path, cases: list[dict[str, Any]],
                     if isinstance(ref, dict) and
                     (str(ref.get("case_id") or ""), str(ref.get("question_id") or "")) != (other_id, other_qid)
                 ] if selected_cluster and relation_kind == "question_cluster" else []
-                can_remove = relation_kind != "question_cluster" or (
+                keeps_valid_cluster = relation_kind != "question_cluster" or (
                     len(remaining) >= 2 and len({str(ref.get("case_id") or "") for ref in remaining}) >= 2
                 )
-                if can_remove:
-                    button = (
-                        f'<button type="button" class="relation-remove" data-relation-remove '
-                        f'data-relation-kind="{html.escape(relation_kind, quote=True)}" '
-                        f'data-relation-id="{html.escape(relation_id, quote=True)}" '
-                        f'data-relation-status="{html.escape(relation.get("status") or "pending", quote=True)}" '
-                        f'data-relation-fingerprint="{html.escape(relation.get("fingerprint") or "", quote=True)}" '
-                        f'data-relation-case-id="{html.escape(other_id, quote=True)}" '
-                        f'data-relation-question-id="{html.escape(other_qid, quote=True)}">'
-                        f'{html.escape(relation.get("action") or "移出这条关联")}</button>'
-                    )
-                else:
-                    button = '<span class="relation-locked">移出后题组将不足两道跨场原题，需整体调整题组</span>'
+                dissolves_cluster = relation_kind == "question_cluster" and not keeps_valid_cluster
+                action_label = "移出并解散题组" if dissolves_cluster else (relation.get("action") or "移出这条关联")
+                button = (
+                    f'<button type="button" class="relation-remove" data-relation-remove '
+                    f'data-relation-kind="{html.escape(relation_kind, quote=True)}" '
+                    f'data-relation-id="{html.escape(relation_id, quote=True)}" '
+                    f'data-relation-status="{html.escape(relation.get("status") or "pending", quote=True)}" '
+                    f'data-relation-fingerprint="{html.escape(relation.get("fingerprint") or "", quote=True)}" '
+                    f'data-relation-case-id="{html.escape(other_id, quote=True)}" '
+                    f'data-relation-question-id="{html.escape(other_qid, quote=True)}" '
+                    f'data-relation-dissolves-cluster="{str(dissolves_cluster).lower()}">'
+                    f'{html.escape(str(action_label))}</button>'
+                )
                 relation_rows.append(
                     '<div class="related-relation"><span class="related-relation-copy">'
                     f'<strong>{html.escape(relation.get("label") or "关联")}</strong>'
@@ -2127,6 +2129,229 @@ def render_history_practice(root: Path, cases: list[dict[str, Any]]) -> str:
 <div class="practice-grid" data-home-questions>{''.join(cards)}</div>{next_button}</section>'''
 
 
+def discover_target_interview_preps(root: Path) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    prep_dir = root / "profile" / "target-interview-preps"
+    if prep_dir.is_dir():
+        for path in sorted(prep_dir.glob("*.json")):
+            payload = read_json(path, {})
+            if isinstance(payload, dict) and isinstance(payload.get("target"), dict):
+                prepared = dict(payload)
+                prepared["_slug"] = path.stem
+                payloads.append(prepared)
+    legacy = read_json(root / "profile" / "target-interview-prep.json", {})
+    if isinstance(legacy, dict) and isinstance(legacy.get("target"), dict):
+        prepared = dict(legacy)
+        prepared["_slug"] = "legacy"
+        payloads.append(prepared)
+    deduped: dict[tuple[str, str], dict[str, Any]] = {}
+    for payload in payloads:
+        target = payload["target"]
+        key = (str(target.get("company") or ""), str(target.get("role") or ""))
+        deduped.setdefault(key, payload)
+    return sorted(
+        deduped.values(),
+        key=lambda value: str(value.get("updated_at") or ""),
+        reverse=True,
+    )
+
+
+def target_interview_prep_filename(payload: dict[str, Any]) -> str:
+    slug = re.sub(r"[^a-z0-9-]+", "-", str(payload.get("_slug") or "legacy").lower()).strip("-")
+    return f"{PREPARATION_HTML_PREFIX}{slug or 'legacy'}.html"
+
+
+def target_prep_evidence_href(root: Path | None, case_id: str, question_id: str) -> str | None:
+    if root is None:
+        return None
+    for manifest_path in (root / "interviews").glob("*/manifest.json"):
+        manifest = read_json(manifest_path, {})
+        if str(manifest.get("case_id") or "") == case_id:
+            relative = manifest_path.parent.relative_to(root).as_posix()
+            return f"{relative}/interview-review.html#practice-{quote(question_id)}"
+    return None
+
+
+def render_target_interview_prep(payload: dict[str, Any], root: Path | None = None) -> str:
+    if not isinstance(payload, dict) or not isinstance(payload.get("target"), dict):
+        return ""
+    target = payload["target"]
+    company = str(target.get("company") or "目标公司")
+    role = str(target.get("role") or "目标岗位")
+    summary = str(target.get("summary") or "")
+    cards: list[str] = []
+    for item in payload.get("questions", []):
+        if not isinstance(item, dict) or not str(item.get("question") or "").strip():
+            continue
+        qid = str(item.get("question_id") or f"target-q-{len(cards) + 1:03d}")
+        source_type = str(item.get("source_type") or "延伸练习题")
+        priority = str(item.get("priority") or "P1")
+        short = str(item.get("short_30s") or "待补充")
+        standard = str(item.get("standard_2m") or "")
+        risks = [str(value) for value in item.get("risks", []) if str(value).strip()]
+        followups = [value for value in item.get("followups", []) if isinstance(value, dict)]
+        sources = [value for value in item.get("sources", []) if isinstance(value, dict)]
+        evidence_refs = [value for value in item.get("evidence_refs", []) if isinstance(value, dict)]
+        details: list[str] = []
+        if standard:
+            details.append(f'<details><summary>查看 2 分钟版</summary><p>{html.escape(standard).replace(chr(10), "<br>")}</p></details>')
+        if followups:
+            rows = "".join(
+                f'<li><strong>{html.escape(str(value.get("question") or "追问"))}</strong>'
+                f'<p>{html.escape(str(value.get("answer") or "待补充"))}</p></li>'
+                for value in followups
+            )
+            details.append(f'<details><summary>查看追问（{len(followups)}）</summary><ol>{rows}</ol></details>')
+        if risks:
+            details.append('<details><summary>风险与待补证据</summary><ul>' + "".join(f'<li>{html.escape(value)}</li>' for value in risks) + '</ul></details>')
+        source_links: list[str] = []
+        for source in sources:
+            url = safe_url(str(source.get("url") or ""))
+            title = str(source.get("title") or "公开来源")
+            if url:
+                source_links.append(f'<li>{external_link(url, title)}</li>')
+        if source_links:
+            details.append('<details><summary>公开依据</summary><ul>' + "".join(source_links) + '</ul></details>')
+        if evidence_refs:
+            evidence_rows: list[str] = []
+            for evidence in evidence_refs:
+                case_id = str(evidence.get("case_id") or "")
+                question_id = str(evidence.get("question_id") or "")
+                href = target_prep_evidence_href(root, case_id, question_id)
+                label_text = f"{case_id} / {question_id}"
+                evidence_rows.append(
+                    f'<li><a href="{html.escape(href, quote=True)}">{html.escape(label_text)}</a></li>'
+                    if href else f'<li>{html.escape(label_text)}</li>'
+                )
+            details.append('<details><summary>个人经历依据</summary><ul>' + "".join(evidence_rows) + '</ul></details>')
+        cards.append(
+            f'<article class="target-prep-card" id="{html.escape(qid, quote=True)}">'
+            f'<div class="target-prep-meta"><span class="priority">{html.escape(priority)}</span>'
+            f'<span class="status unverified">{html.escape(source_type)}</span></div>'
+            f'<h3>{html.escape(str(item.get("question") or ""))}</h3>'
+            f'<p><strong>30 秒版：</strong>{html.escape(short).replace(chr(10), "<br>")}</p>'
+            + "".join(details) + '</article>'
+        )
+    reverse = [str(value) for value in payload.get("reverse_questions", []) if str(value).strip()]
+    reverse_html = (
+        '<details class="target-prep-reverse"><summary>反问环节</summary><ol>'
+        + "".join(f'<li>{html.escape(value)}</li>' for value in reverse) + '</ol></details>'
+        if reverse else ""
+    )
+    company_source_links: list[str] = []
+    for source in payload.get("company_sources", []):
+        if not isinstance(source, dict):
+            continue
+        url = safe_url(str(source.get("url") or ""))
+        title = str(source.get("title") or "公司公开来源")
+        if url:
+            company_source_links.append(f'<li>{external_link(url, title)}</li>')
+    company_sources_html = (
+        '<details><summary>公司与岗位公开来源</summary><ul>'
+        + "".join(company_source_links)
+        + '</ul></details>'
+        if company_source_links else ""
+    )
+    jd = payload.get("jd")
+    jd_html = '<p class="muted">未保存岗位 JD 文字；以下依据现有摘要准备。</p>'
+    if isinstance(jd, dict) and str(jd.get("text") or "").strip():
+        source_type = str(jd.get("source_type") or "来源未标注")
+        source_note = str(jd.get("source_note") or "")
+        source_url = safe_url(str(jd.get("source_url") or ""))
+        source_label = external_link(source_url, source_type) if source_url else html.escape(source_type)
+        jd_html = (
+            '<section id="target-jd" class="target-prep-jd"><h3>岗位 JD</h3>'
+            f'<p class="muted">来源：{source_label}</p>'
+            + (f'<p class="muted">{html.escape(source_note)}</p>' if source_note else "")
+            + f'<pre>{html.escape(str(jd["text"]))}</pre></section>'
+        )
+    if not cards and not reverse_html:
+        return ""
+    return (
+        '<section id="target-prep" class="target-prep"><div class="topic-heading">'
+        f'<h2>{html.escape(company)} · 面试准备</h2><span class="status unverified">{html.escape(str(payload.get("status") or "pending"))}</span></div>'
+        f'<p><strong>目标岗位：</strong>{html.escape(role)}</p>'
+        + (f'<p class="muted">{html.escape(summary)}</p>' if summary else "")
+        + '<p class="muted">招聘方参考题、历史原题和延伸练习题已分开标注；草稿不代表真实面试原话。</p>'
+        + company_sources_html
+        + jd_html
+        + f'<div class="target-prep-grid">{"".join(cards)}</div>{reverse_html}</section>'
+    )
+
+
+def render_target_prep_entry(root: Path) -> str:
+    payloads = discover_target_interview_preps(root)
+    if not payloads:
+        return ""
+    names = [str(item["target"].get("company") or "目标公司") for item in payloads]
+    return (
+        '<section id="target-prep-entry" class="target-prep">'
+        '<div class="topic-heading"><h2>公司面试准备</h2>'
+        f'<span class="status unverified">{len(payloads)} 家</span></div>'
+        f'<p>{html.escape("、".join(names))}</p>'
+        f'<p><a class="primary-link" href="{PREPARATIONS_HTML}">打开公司面试准备 →</a></p></section>'
+    )
+
+
+def render_interview_preparations(root: Path) -> str:
+    payloads = discover_target_interview_preps(root)
+    has_interviews = bool(discover_cases(root))
+    navigation = (
+        f'<nav class="topnav" aria-label="本页导航"><a href="{HISTORY_HTML}">面试总览</a>'
+        f'<a href="{QUESTION_BANK_HTML}">完整题库</a><a href="{ANSWERS_HTML}">已生成答案</a></nav>'
+        if has_interviews else ""
+    )
+    cards: list[str] = []
+    for payload in payloads:
+        target = payload["target"]
+        company = str(target.get("company") or "目标公司")
+        role = str(target.get("role") or "目标岗位")
+        summary = str(target.get("summary") or "")
+        question_count = len([
+            item for item in payload.get("questions", [])
+            if isinstance(item, dict) and str(item.get("question") or "").strip()
+        ])
+        cards.append(
+            '<article class="target-prep-card">'
+            f'<div class="target-prep-meta"><span class="priority">{question_count} 题</span>'
+            f'<span class="status unverified">{html.escape(str(payload.get("status") or "pending"))}</span></div>'
+            f'<h2>{html.escape(company)}</h2><p><strong>目标岗位：</strong>{html.escape(role)}</p>'
+            + (f'<p class="muted">{html.escape(summary)}</p>' if summary else "")
+            + f'<p><a class="primary-link" href="{target_interview_prep_filename(payload)}">打开该公司准备 →</a></p>'
+            '</article>'
+        )
+    return f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+{SECURITY_META}<title>公司面试准备</title><style>{STYLE}</style></head><body data-interview-preparations data-store-id="{archive_id(root)}"><main>
+{navigation}
+<header class="hero"><div class="eyebrow">Interview System · Company Preparation</div><h1>公司面试准备</h1>
+<p>共 {len(payloads)} 家目标公司。招聘方参考题、历史原题和延伸练习题分开标注。</p></header>
+{privacy_notice(compact=True)}
+<section class="target-prep"><div class="target-prep-grid">{''.join(cards) or '<p class="muted">暂无目标公司准备。</p>'}</div></section>
+<p class="foot">本页是准备稿，不是历史面试记录；未确认内容不会自动升级为成熟答案。</p>
+</main><script>{SCRIPT}</script></body></html>"""
+
+
+def render_interview_preparation(root: Path, payload: dict[str, Any]) -> str:
+    target = payload["target"]
+    company = str(target.get("company") or "目标公司")
+    role = str(target.get("role") or "目标岗位")
+    interview_links = (
+        f'<a href="{HISTORY_HTML}">面试总览</a><a href="{QUESTION_BANK_HTML}">完整题库</a>'
+        if discover_cases(root) else ""
+    )
+    return f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+{SECURITY_META}<title>{html.escape(company)}面试准备</title><style>{STYLE}</style></head><body data-interview-preparation data-store-id="{archive_id(root)}"><main>
+<nav class="topnav" aria-label="本页导航"><a href="{PREPARATIONS_HTML}">公司列表</a>{interview_links}</nav>
+<header class="hero"><div class="eyebrow">Interview System · Company Preparation</div><h1>{html.escape(company)}</h1>
+<p>{html.escape(role)} · 单公司面试准备</p></header>
+{privacy_notice(compact=True)}
+{render_target_interview_prep(payload, root)}
+<p class="foot">本页是准备稿，不是历史面试记录；未确认内容不会自动升级为成熟答案。</p>
+</main><script>{SCRIPT}</script></body></html>"""
+
+
 def transcript_view(case_path: Path) -> str:
     source = case_path / "transcript.revised.json"
     if not source.is_file():
@@ -2352,9 +2577,10 @@ STYLE += """
 [data-home-question][hidden]{display:none}.home-question-direction{margin:5px 0;color:#31577d;font-size:13px;font-weight:700}.home-next{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;padding:14px 16px;background:#f6faff;border:1px solid #c9daf0;border-radius:10px}.home-next p{flex:1 1 320px;margin:0;color:#475569;font-size:13px}.home-navigation{display:flex;align-items:center;gap:9px;flex:0 0 auto}.home-navigation span{min-width:72px;text-align:center;color:#31577d;font-size:13px;font-variant-numeric:tabular-nums}.home-next button{flex:0 1 auto;border:0;border-radius:8px;padding:9px 12px;background:#2458bd;color:#fff;font:inherit;font-weight:700;cursor:pointer;text-align:left;min-height:40px}.home-next button:disabled{opacity:.5;cursor:not-allowed}.home-next button:focus-visible{outline:3px solid #93c5fd;outline-offset:2px}
 .home-goal-grid{grid-template-columns:minmax(0,1fr)}.home-goal-grid .goal-card{padding:18px;background:#f6faff}.goal-details{margin-top:10px;font-size:13px;color:#475569}.goal-details>summary{cursor:pointer;font-weight:700}.goal-details p{margin:8px 0}.more-goals{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}.more-goals>summary{cursor:pointer;font-weight:700;color:#31577d}.more-goals .goal-grid{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:12px}.home-practice-card .practice-recorder{margin:12px 0}.home-practice-card .practice-context{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}.home-practice-card .practice-context>summary{cursor:pointer;color:#31577d;font-weight:700}.practice-save-note{font-size:12px;color:var(--muted);margin:7px 0}.overview-hero{margin-bottom:18px}
 .next-prep{margin:0 0 22px;padding:22px 28px;background:#fff;border:1px solid #c9daf0;border-radius:16px}.goal-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.goal-card{padding:16px;border:1px solid var(--line);border-radius:12px;background:#fbfdff}.goal-heading{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.goal-heading h3{margin:0;font-size:16px;line-height:1.45}.goal-card p{margin:9px 0;font-size:13px;line-height:1.6}.goal-card .acceptance{color:#31577d}.goal-sources{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}.goal-sources summary{font-size:12px;color:#31577d}.goal-sources ul{padding-left:1.1rem;font-size:12px;color:var(--muted)}.goal-sources li+li{margin-top:5px}.cluster-on-demand{margin:0 0 22px;background:#f8fafc;border:1px solid var(--line);border-radius:14px;padding:0}.cluster-on-demand>summary{cursor:pointer;padding:16px 20px;font-weight:800;color:#334155}.secondary-details,.history-archive{margin:0 0 22px;padding:0;background:#f8fafc;border:1px solid var(--line);border-radius:14px}.secondary-details>summary,.history-archive>summary{cursor:pointer;padding:16px 20px;font-weight:800;color:#334155}.secondary-details[open]>summary,.history-archive[open]>summary{border-bottom:1px solid var(--line)}.history-archive>#history{margin:18px;padding:22px}.history-archive #history{border-radius:12px}
+.target-prep{margin-top:24px;padding:22px 24px;background:#fff;border:1px solid #bfdbfe;border-radius:16px}.target-prep-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.target-prep-card{padding:17px;border:1px solid var(--line);border-radius:12px;background:#fbfdff}.target-prep-card h3{margin:10px 0}.target-prep-meta{display:flex;gap:8px;align-items:center}.target-prep-card details{background:#fff}.target-prep-reverse{margin-top:16px}.target-prep-jd{margin:18px 0;padding:17px;border:1px solid var(--line);border-radius:12px;background:#fbfdff}.target-prep-jd h3{margin:0 0 8px}.target-prep-jd pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.65;margin:12px 0 0}
 .standard-answer-library{margin:0 0 18px;padding:0;background:#f8fafc;border:1px solid var(--line);border-radius:14px}.standard-answer-library>summary{cursor:pointer;padding:16px 20px;font-weight:800;color:#334155}.standard-answer-library>p,.standard-answer-library>.standard-answer{margin-left:18px;margin-right:18px}.standard-answer-library>.standard-answer:last-child{margin-bottom:18px}.standard-answer{padding:0}.standard-answer>.standard-heading{cursor:pointer;padding:14px 16px;list-style:none}.standard-answer>.standard-heading::-webkit-details-marker{display:none}.standard-answer>.standard-heading::after{content:"＋";font-size:18px;color:#31577d}.standard-answer[open]>.standard-heading::after{content:"－"}.standard-answer>.standard-body{padding:0 16px 16px}.standard-versions{display:block}.standard-versions>details{margin-top:10px;padding:12px 13px;background:#fff;border:1px solid var(--line);border-radius:10px}.standard-versions>details>summary{cursor:pointer;font-weight:700}.standard-versions>details>p{margin-top:9px}
 .answer-entry{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 22px;padding:17px 20px;background:#fff;border:1px solid #c9daf0;border-radius:14px}.answer-entry h2,.answer-entry p{margin:0}.answer-entry p{margin-top:4px;color:var(--muted);font-size:13px}.answer-hub-section{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px 28px;margin:0 0 22px}.answer-hub-section h2{margin:0 0 5px}.answer-hub-section>.muted{margin:0 0 16px}.answer-hub-section>.standard-answer{margin:9px 0}.saved-question-answer{margin:9px 0;padding:0;border:1px solid var(--line);border-radius:11px;background:#f8fafc;scroll-margin-top:75px}.saved-question-answer>summary{cursor:pointer;padding:14px 16px;font-weight:700;line-height:1.45}.saved-question-answer>summary small{display:block;margin-top:4px;color:var(--muted);font-weight:400}.saved-question-answer>.saved-answer-body{padding:0 16px 15px}.saved-question-answer .reference-answer{margin:0;padding:12px 14px}.answer-hub-empty{display:none;color:var(--muted)}
-@media(max-width:760px){.goal-grid,.more-goals .goal-grid{grid-template-columns:1fr}.next-prep{padding:18px}.history-archive>#history{margin:12px;padding:18px}}
+@media(max-width:760px){.goal-grid,.more-goals .goal-grid,.target-prep-grid{grid-template-columns:1fr}.next-prep,.target-prep{padding:18px}.history-archive>#history{margin:12px;padding:18px}}
 """
 
 
@@ -2919,7 +3145,11 @@ SCRIPT = """
         button.closest('.related-relation')?.append(' 当前是只读页面，请通过本机保存入口打开。');
         return;
       }
-      if (!window['confirm'](`确认${button.textContent.trim()}？原题和现场回答仍保留在原场次。`)) return;
+      const dissolvesCluster = button.dataset.relationDissolvesCluster === 'true';
+      const confirmation = dissolvesCluster
+        ? '确认移出这道原题并解散整个题组？组内原题和现场回答仍保留在各自原场次，并恢复为未归组。'
+        : `确认${button.textContent.trim()}？原题和现场回答仍保留在原场次。`;
+      if (!window['confirm'](confirmation)) return;
       button.disabled = true;
       const body = {
         relation_kind: button.dataset.relationKind,
@@ -2941,7 +3171,9 @@ SCRIPT = """
           button.disabled = false;
           return;
         }
-        if (relation) relation.textContent = '已从题组移出；页面将刷新。';
+        if (relation) relation.textContent = payload.dissolved_cluster
+          ? '已移出并解散题组；页面将刷新。'
+          : '已从题组移出；页面将刷新。';
         window.setTimeout(() => window.location.reload(), 350);
       } catch (_) {
         if (relation) relation.append(' 未连接到本机保存服务，尚未修改档案。');
@@ -3716,14 +3948,17 @@ def render_case(case: dict[str, Any], cases: list[dict[str, Any]]) -> str:
 
 
 def render_history_index(root: Path, cases: list[dict[str, Any]]) -> str:
+    target_prep = render_target_prep_entry(root)
+    target_nav = f'<a href="{PREPARATIONS_HTML}">公司面试准备</a>' if target_prep else ''
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 {SECURITY_META}<title>面试总览</title><style>{STYLE}</style></head><body data-interview-history data-store-id="{archive_id(root)}"><main>
-<nav class="topnav" aria-label="本页导航"><a href="#practice">练习</a><a href="#history-archive">历史面试</a></nav>
+<nav class="topnav" aria-label="本页导航">{target_nav}<a href="#practice">练习</a><a href="#history-archive">历史面试</a></nav>
 <header class="hero overview-hero"><div class="eyebrow">Interview System · Local Archive</div><h1>面试练习</h1>
 <p>从一道真实题目开始；已有参考答案放在题目旁。历史面试记录可随时查看。</p></header>
 {privacy_notice(compact=True)}
 <div id="overview">
+{target_prep}
 {render_history_practice(root, cases)}
 {render_pending_review_entry(root)}
 <details id="history-archive" class="history-archive"><summary>查看全部 {len(cases)} 场历史档案与搜索</summary>{render_history_section(cases, None, False)}</details>
@@ -4022,6 +4257,7 @@ def main() -> int:
                     "question_bank": str(root / QUESTION_BANK_HTML),
                     "answers": str(root / ANSWERS_HTML),
                     "pending_review": str(root / PENDING_REVIEW_HTML),
+                    "preparations": str(root / PREPARATIONS_HTML),
                     "history_cases": len(cases),
                     "errors": errors,
                 },
@@ -4054,11 +4290,23 @@ def main() -> int:
     pending_review = render_pending_review(root, cases)
     errors.extend(smoke_check(pending_review, ["data-interview-pending-review", 'id="review-center"', "下载选择"]))
     pending_review_path = root / PENDING_REVIEW_HTML
+    preparations = render_interview_preparations(root)
+    errors.extend(smoke_check(preparations, ["data-interview-preparations", "公司面试准备", f'href="{HISTORY_HTML}"']))
+    preparations_path = root / PREPARATIONS_HTML
+    preparation_pages: list[tuple[Path, str]] = []
+    for payload in discover_target_interview_preps(root):
+        preparation = render_interview_preparation(root, payload)
+        company = str(payload["target"].get("company") or "目标公司")
+        errors.extend(smoke_check(preparation, ["data-interview-preparation", company, f'href="{PREPARATIONS_HTML}"']))
+        preparation_pages.append((root / target_interview_prep_filename(payload), preparation))
     if not errors:
         write_text(index_path, history)
         write_text(question_bank_path, question_bank)
         write_text(answers_path, answers)
         write_text(pending_review_path, pending_review)
+        write_text(preparations_path, preparations)
+        for preparation_path, preparation in preparation_pages:
+            write_text(preparation_path, preparation)
 
     status = "ok" if not errors else "error"
     print(
@@ -4070,6 +4318,8 @@ def main() -> int:
                 "question_bank": str(question_bank_path),
                 "answers": str(answers_path),
                 "pending_review": str(pending_review_path),
+                "preparations": str(preparations_path),
+                "preparation_pages": [str(path) for path, _ in preparation_pages],
                 "history_cases": len(cases),
                 "errors": errors,
             },

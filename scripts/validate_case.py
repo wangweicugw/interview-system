@@ -345,7 +345,13 @@ def main() -> int:
                     ):
                         errors.append("转写提示词 sha256 无效")
             method = transcription.get("speaker_method")
-            if method not in {"none", "source_labels", "diarization", "channel_split"}:
+            if method not in {
+                "none",
+                "source_labels",
+                "diarization",
+                "channel_split",
+                "semantic_role_assignment",
+            }:
                 errors.append("transcription.speaker_method 无效")
             confidence = transcription.get("speaker_confidence")
             if confidence is not None and (

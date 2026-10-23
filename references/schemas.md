@@ -234,6 +234,39 @@ PDF 输入的逐页提取方法记录在 `manifest.inputs.transcript_pdf_pages` 
 
 这是由 `build_next_prep.py` 从既有 case 与 `profile/state.json` 生成的派生快照，包含 `schema_version`、`generated_at`、`source_case`、`requirements`、`profile.confirmed`、`profile.pending`、`profile.rejected_count` 和 `actions`。它不新增事实，不把 `pending` 自动升级为 `confirmed`；预测性追问不属于该脚本的输出。
 
+## target-interview-preps
+
+私有 `profile/target-interview-preps/<slug>.json` 每个文件保存一家目标公司的准备稿，不属于历史面试 case：
+
+```json
+{
+  "schema_version": 1,
+  "status": "pending",
+  "target": {"company": "目标公司", "role": "目标岗位", "summary": "JD 摘要"},
+  "jd": {"text": "完整岗位文字", "source_type": "用户截图转写", "source_note": "逐项核对截图；正式职位名未显示"},
+  "questions": [{
+    "question_id": "target-q-001",
+    "source_type": "招聘方参考题",
+    "priority": "P0",
+    "question": "题目",
+    "short_30s": "30 秒版",
+    "standard_2m": "2 分钟版",
+    "risks": ["待补证据"],
+    "followups": [{"question": "追问", "answer": "答法"}],
+    "sources": [{"title": "公开来源", "url": "https://..."}]
+  }],
+  "reverse_questions": ["反问问题"]
+}
+```
+
+`jd` 为可选对象，旧准备稿无需迁移；提供时 `text` 必须是非空完整岗位文字，`source_type` 为 `用户提供文本`、`用户截图转写`、`本地 OCR` 或 `公开招聘页`。`source_note` 可说明转写限制；公开招聘页还须提供 HTTP(S) `source_url`。截图和 OCR 文本应在页面标明提取方式，不冒充官方原文。`status` 为 `pending`、`confirmed` 或 `rejected`。`source_type` 使用 `招聘方参考题`、`历史原题`、`用户记忆转述` 或 `延伸练习题`。每题必须有唯一 `question_id`、题目和 30 秒版；2 分钟版、追问、风险和 HTTP(S) 资料链接可选。招聘方参考题与延伸题不能写入 `qa-tree.json`，除非它后来确实在真实面试中出现并有原始证据。
+
+`evidence_refs` 可选，用于引用个人档案中的真实证据，每项至少包含 `case_id` 和 `question_id`；它只证明答案取材位置，不自动证明准备稿中的扩展表述。公司与岗位公开资料可保存在题目的 `sources`，或顶层可选的 `company_sources`；链接必须为 HTTP(S)。公司事实、个人事实和 AI 建议不可只靠同一个无类型文本字段混写。
+
+文件名使用稳定的小写英文、数字和连字符。不同文件的 `target.company + target.role` 不得重复。渲染器将 `interview-preparations.html` 生成为公司入口列表，并按文件名生成 `interview-preparation-<slug>.html` 单公司详情页；旧 `profile/target-interview-prep.json` 仅用于兼容读取，并在与目录内容重复时自动去重。
+
+写入前运行 `check_target_interview_preps.py --root <data-root> --input <准备稿JSON> [--slug <更新目标slug>]`；保存使用 `upsert_target_interview_prep.py --root <data-root> --slug <稳定slug> --input <准备稿JSON> [--render]`。更新同一 slug 会向私有修订日志追加前后快照；公司与岗位重复但 slug 不同会被拒绝。
+
 ## jd-matrix.json
 
 每项记录 `requirement`、`coverage`（`not_asked/shallow/deep`）、`performance`（`unverified/strong/medium/weak`）、`evidence_questions`、`next_priority`（`high/medium/low`）和 `inference_note`。
