@@ -80,10 +80,13 @@ def main() -> int:
         if (root / relative).is_symlink():
             raise RuntimeError(f"数据目录内不允许受保护路径为符号链接：{relative}")
 
+    # 显式 0700：部分宿主（含本机实测的 macOS Python）不把 umask 应用到 mkdir，
+    # 只靠 os.umask(0o077) 会留下 0755 的敏感目录。
     for relative in (
         "interviews",
         "profile",
         "events",
+        "knowledge",
         "knowledge/mysql",
         "knowledge/redis",
         "knowledge/kafka",
@@ -92,7 +95,9 @@ def main() -> int:
         "algorithms",
         "logs",
     ):
-        (root / relative).mkdir(parents=True, exist_ok=True)
+        directory = root / relative
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        directory.chmod(0o700)
 
     gitignore = root / ".gitignore"
     if not gitignore.exists():
