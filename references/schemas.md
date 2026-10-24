@@ -148,7 +148,7 @@ PDF 输入的逐页提取方法记录在 `manifest.inputs.transcript_pdf_pages` 
 
 用户在本机页面核对并保存本题练习答案时，同一题可增加 `curated_answer: {"status":"confirmed","versions":{"short_30s":"...","standard_2m":"..."}}`。它优先于 `reference_answer` 展示，但不覆盖旧参考稿、跨场成熟答案或现场回答；完整修改前后快照追加在私有 `profile/case-answer-revisions.jsonl`。
 
-私有 `profile/practice-focus.json` 的重点题引用可附 `reference_answer` 和 `followup_answers`；后者按 `followups` 的顺序一题一答。渲染器优先使用重点题引用中的答案，其次使用单场 `practice-answers.json`。运行 `check_practice_answers.py --root <data-root> --scope focus|all` 检查所要求范围的原题与延伸追问是否全部有答案。
+私有 `profile/practice-focus.json` 的重点题引用可附 `reference_answer` 和 `followup_answers`；后者按 `followups` 的顺序一题一答。渲染器优先使用重点题引用中的答案，其次使用单场 `practice-answers.json`。运行 `check_practice_answers.py --root <data-root> --scope focus|all` 检查所要求范围的原题与延伸追问是否全部有答案；加 `--case <case_id|场次目录名|绝对路径>` 只校验单场，并忽略 `--scope`。输出的 `answers_without_sources` 列出有答案但缺 `sources` 的题目，属于提示而非失败。`sources` 每项至少含 `title` 与 `url`，且须是实际打开核对过的来源；内部实现或个人经历类结论无法外部核验时，在 `scope` 里说明，不要填占位链接。
 
 ## 跨场成熟答案
 
