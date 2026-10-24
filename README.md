@@ -83,6 +83,8 @@ Windows PowerShell 演示（`--root` 须为不存在或空的目录）：
 
 ### 打开面试档案
 
+macOS 可双击 Skill 目录中的 [start-interview-system.command](start-interview-system.command)。首次运行输入已选定的私有档案绝对路径；脚本将路径保存在本机 `~/.config/interview-system/data-root`，不写入 Skill 仓库。更换档案目录时，在终端运行 `./start-interview-system.command --root <data-root>`；可加 `--check` 只检查启动配置。
+
 在终端运行一次，`<data-root>` 必须是你已指定的私有档案绝对路径；浏览器会自动打开当前本机会话入口，查看和保存都从这里进入：
 
 ```bash

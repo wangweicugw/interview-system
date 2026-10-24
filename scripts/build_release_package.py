@@ -20,6 +20,7 @@ PACKAGE_ROOT = PurePosixPath("interview-system")
 EXCLUDED_NAMES = {"__pycache__", ".DS_Store"}
 PACKAGE_FILES = (
     "SKILL.md",
+    "start-interview-system.command",
     "README.md",
     "LICENSE",
     "CONTRIBUTING.md",
@@ -55,6 +56,7 @@ PACKAGE_FILES = (
     "scripts/audit_question_coverage.py",
     "scripts/audit_standard_answers.py",
     "scripts/backup_store.py",
+    "scripts/build_mistake_book.py",
     "scripts/build_next_prep.py",
     "scripts/build_pages_demo.py",
     "scripts/build_release_package.py",
@@ -81,10 +83,12 @@ PACKAGE_FILES = (
     "scripts/local_answer_server.py",
     "scripts/migrate_legacy_audio.py",
     "scripts/migrate_store.py",
+    "scripts/normalize_question_categories.py",
     "scripts/ocr_image.swift",
     "scripts/pdf_ocr.py",
     "scripts/profile_store.py",
     "scripts/privacy_check.py",
+    "scripts/question_taxonomy.py",
     "scripts/record_practice_attempt.py",
     "scripts/record_profile_patch.py",
     "scripts/refresh_question_clusters.py",

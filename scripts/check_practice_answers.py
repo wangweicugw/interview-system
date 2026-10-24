@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import question_taxonomy
 from render_interview_html import case_answer_map, discover_cases, practice_items, read_json
 
 
@@ -22,10 +23,7 @@ def has_answer(value: Any) -> bool:
     )
 
 
-TECHNICAL_CATEGORIES = {
-    "technical", "algorithm", "coding", "system_design", "design",
-    "architecture", "database", "messaging",
-}
+TECHNICAL_CATEGORIES = {"technical", "algorithm", "system_design"}
 
 
 def has_sources(value: Any) -> bool:
@@ -89,6 +87,8 @@ def check(root: Path, scope: str, case_ref: str = "") -> dict[str, Any]:
             if not isinstance(ref, dict):
                 continue
             case_id = str(ref.get("case_id") or "")
+            if target_case is not None and case_id != str(target_case["case_id"]):
+                continue
             qid = str(ref.get("question_id") or "")
             key = (case_id, qid)
             case = by_case.get(case_id)
@@ -129,7 +129,8 @@ def check(root: Path, scope: str, case_ref: str = "") -> dict[str, Any]:
         if not curated_complete and not has_answer(answer):
             errors.append(f"缺少原题参考答案：{case_id}/{qid}")
         elif (not curated_complete
-              and categories.get(case_id, {}).get(qid, "") in TECHNICAL_CATEGORIES
+              and question_taxonomy.normalize(categories.get(case_id, {}).get(qid, ""))
+              in TECHNICAL_CATEGORIES
               and not has_sources(answer)):
             without_sources.append(f"{case_id}/{qid}")
     for (case_id, qid), ref in focused.items():

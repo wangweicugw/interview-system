@@ -9,6 +9,8 @@ description: 复盘真实面试并维护个人长期面试档案，也支持按�
 
 用户要求快速上手时，由 Agent 按 [README Quickstart](README.md#quickstart交给-agent) 完成安装、环境检查和虚构样例验收；有真实资料或已有档案时，再按下文规则导入或打开本机服务。不要把命令清单当成用户必须手动完成的前置步骤；私有目录和真实资料授权仍须按实际需要确认。GitHub Pages 只展示虚构材料，不能保存到个人档案。
 
+macOS 双击入口为 Skill 根目录的 [start-interview-system.command](start-interview-system.command)；它只从本机私有配置读取已指定的档案路径，首次使用可由用户输入，不在公开源码中保存个人目录。
+
 脚本路径必须从本文件所在的 Skill 目录解析，不能假设当前工作目录包含 `scripts/`。下文的 `<skill-dir>` 和 `<data-root>` 必须替换为实际绝对路径；`<python>` 为可用的 Python 3.10+ 命令。macOS/Linux 可用 `.venv/bin/python` 或 `python3`；Windows PowerShell 可用 `.venv\Scripts\python.exe`、`py -3` 或已安装的 `python`。命令行路径和续行符应按当前系统转换；`init_store.py` 不会自动创建虚拟环境。Windows 已有用户试跑成功反馈，具体环境与覆盖范围未记录；需要录音、扫描件或模型能力时仍须分别实测。
 
 初次使用或更换宿主后，先运行 `<python> <skill-dir>/scripts/doctor.py` 检查本地候选能力；它不读取面试资料，也不能代替模型和 OCR 的实际验收。
@@ -116,14 +118,17 @@ description: 复盘真实面试并维护个人长期面试档案，也支持按�
    <python> <skill-dir>/scripts/record_profile_patch.py --root <data-root> --case <case_path>
    ```
 
-8. 按 [references/html-presentation.md](references/html-presentation.md) 重建全部场次的离线 HTML。结果页须展示本场保存的 JD 原文，随后展示 JD 能力矩阵；未提供 JD 时明确标注。校验当前场：
+8. 先刷新错题本，再按 [references/html-presentation.md](references/html-presentation.md) 重建全部场次的离线 HTML。结果页须展示本场保存的 JD 原文，随后展示 JD 能力矩阵；未提供 JD 时明确标注。校验当前场：
 
    ```bash
+   <python> <skill-dir>/scripts/build_mistake_book.py --root <data-root>
    <python> <skill-dir>/scripts/render_interview_html.py --root <data-root> --all
    <python> <skill-dir>/scripts/validate_case.py --case <case_path> --stage presentation
    ```
 
-9. 对话中只给结论摘要、最高风险和下一步；先启动或复用本机服务，再优先提供服务内的当前场 `interview-review.html` 与根目录 `interview-history.html`，不要混用 `file://` 链接。用户要看全部答案时链接服务内的 `interview-answers.html`，要找原题时链接 `interview-question-bank.html`；需要纠错时再给 `interview-pending-review.html`。
+   错题本只汇总 `verdict=incorrect` 的 claim。「正确说法」「记忆点」「复述提示」来自 `profile/mistake-book-notes.json`，属于人工整理内容，不自动生成；没整理过的条目只展示 claim 自带的说明和来源，不要用模型补写结论。改了 claim 判定就要重跑构建器，否则页面会提示与 claims 不一致。
+
+9. 对话中只给结论摘要、最高风险和下一步；先启动或复用本机服务，再优先提供服务内的当前场 `interview-review.html` 与根目录 `interview-history.html`，不要混用 `file://` 链接。用户要看全部答案时链接服务内的 `interview-answers.html`，要找原题时链接 `interview-question-bank.html`；需要集中复习说错的技术点时给 `interview-mistakes.html`；需要纠错时再给 `interview-pending-review.html`。
 
 准备下一场时，可从最近一场含 JD 矩阵的场次生成确定性简报：
 

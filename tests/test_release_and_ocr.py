@@ -15,7 +15,7 @@ sys.path.insert(0, str(SKILL / "scripts"))
 
 from build_release_package import build  # noqa: E402
 from check_data_compatibility import scan_store  # noqa: E402
-from check_public_release import audit  # noqa: E402
+from check_public_release import audit, scan_text  # noqa: E402
 from common import SchemaCompatibilityError, write_json  # noqa: E402
 from demo_smoke import run_demo  # noqa: E402
 from pdf_ocr import _ocr_image  # noqa: E402
@@ -162,6 +162,12 @@ class ReleaseAndOcrTest(unittest.TestCase):
             self.assertTrue(any("疑似密钥" in item for item in result["blockers"]))
             self.assertTrue(any("本地数据目录" in item for item in result["blockers"]))
             self.assertNotIn(secret, str(result))
+
+    def test_release_audit_blocks_private_case_ids_without_echoing_them(self) -> None:
+        identifier = "int-" + "20260101-" + "deadbeef"
+        blockers, _ = scan_text("workspace", "scripts/example.py", identifier.encode())
+        self.assertTrue(any("面试场次 ID" in item for item in blockers))
+        self.assertNotIn(identifier, str(blockers))
 
     def test_release_audit_distinguishes_staged_and_history(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

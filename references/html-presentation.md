@@ -13,6 +13,7 @@
 - 已生成答案：`<data-root>/interview-answers.html`，集中搜索和展开跨场参考答案、逐题参考答案与延伸追问答案；从首页题目旁的链接进入。
 - 独立题库：`<data-root>/interview-question-bank.html`，提供全量题目、题目搜索、主题书签和练习控件；从首页练习区按需进入。
 - 待确认审核：`<data-root>/interview-pending-review.html`。
+- 错题本：`<data-root>/interview-mistakes.html`，只收 `verdict=incorrect` 的 claim，按知识主题分组；每条并列「我的说法」「错在哪」「正确说法」「记忆点」「复述提示」和来源。正确说法与记忆点来自人工整理的 `profile/mistake-book-notes.json`，不是模型生成；未整理的条目只展示 claim 自带说明与来源。页面提供搜索和「只看未复习」，「已复习」只写浏览器本地存储，不写档案。错题条数与当前 `claims.json` 不一致时页面必须提示重跑 `build_mistake_book.py`。
 - 公司面试准备：`<data-root>/interview-preparations.html` 只列目标公司；每家公司使用独立的 `<data-root>/interview-preparation-<slug>.html`，先展示该岗位保存的 JD 文字与来源，再展示题目与答案。未保存 JD 时明确提示；截图人工转写或 OCR 文本不得冒充官方原文。
 - 每场页面必须包含可搜索的历史面试区；统一总览在折叠的历史档案区按公司、岗位、轮次、结果和复盘关键词搜索场次，并从练习区进入独立题库。
 - 每场页面在 JD 能力矩阵前展示本场导入并保存的 JD 文本；保留原文段落与换行，扫描版标明 OCR，历史截图人工转写标明来源，缺失或提取失败时明确提示。JD 原文与能力矩阵不能混为一谈。

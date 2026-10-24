@@ -16,10 +16,10 @@ from typing import Iterable
 
 
 ROOT_FILES = {
-    ".gitignore", "SKILL.md", "README.md", "LICENSE", "LICENSE.md",
+    ".gitignore", "SKILL.md", "start-interview-system.command", "README.md", "LICENSE", "LICENSE.md",
     "CONTRIBUTING.md", "SECURITY.md", "requirements.lock", "requirements-optional.txt",
 }
-SKIP_DIRECTORIES = {".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".venv", ".venv-whisperx"}
+SKIP_DIRECTORIES = {".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".venv", ".venv-whisperx", ".workbuddy-ai"}
 PRIVATE_DIRECTORIES = {"private", "interviews", "profile", "events", "logs", "models", "practice"}
 SUSPICIOUS_BINARY_SUFFIXES = {
     ".aac", ".docx", ".flac", ".html", ".m4a", ".mp3", ".mp4", ".pdf", ".wav",
@@ -43,6 +43,7 @@ GENERIC_SECRET = re.compile(
     r"\s*[:=]\s*['\"]([^'\"\s]{20,})['\"]"
 )
 PERSONAL_PATH = re.compile(r"/(?:Users|home)/[^/\s'\"]+")
+INTERVIEW_CASE_ID = re.compile(r"\bint-20\d{6}-[0-9a-f]{8}\b")
 EMAIL = re.compile(r"(?i)(?<![\w.+-])[\w.+-]+@[A-Z0-9.-]+\.[A-Z]{2,}(?![\w.-])")
 PHONE_CN = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
 ID_CN = re.compile(
@@ -128,6 +129,11 @@ def scan_text(scope: str, locator: str, content: bytes) -> tuple[list[str], list
     if path_match:
         blockers.append(
             f"[{scope}] 疑似个人绝对路径：{locator}:第{line_number(text, path_match.start())}行"
+        )
+    case_match = INTERVIEW_CASE_ID.search(text)
+    if case_match:
+        blockers.append(
+            f"[{scope}] 疑似真实面试场次 ID：{locator}:第{line_number(text, case_match.start())}行"
         )
     for label, pattern in (("邮箱", EMAIL), ("手机号", PHONE_CN), ("身份证号", ID_CN)):
         match = pattern.search(text)
