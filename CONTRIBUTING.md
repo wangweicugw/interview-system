@@ -18,6 +18,20 @@ python scripts/demo_smoke.py --root /tmp/interview-system-demo
 
 演示目录必须不存在或为空。重复运行前请换一个新目录。
 
+## 浏览器 E2E
+
+普通 `unittest` 回归不安装浏览器依赖。需要运行真实浏览器验收时，先安装独立依赖并下载 Chromium：
+
+```bash
+python -m pip install -r requirements.lock -r requirements-e2e.txt
+python -m playwright install --with-deps chromium
+python -B tests/test_browser_e2e.py
+```
+
+E2E 只使用虚构资料和受控回环服务，覆盖目标公司准备页、练习保存、服务重启和练习回看。GitHub Actions 的 `browser-e2e` job 会重复安装 Playwright/Chromium 后执行；普通 Python 测试不会隐式下载浏览器。
+
+当前事务日志和跨进程写锁只覆盖审核操作、练习记录和目标公司准备稿这三条写路径；其他写入路径尚未全局事务化，不应据此宣称整个档案系统具备统一原子提交。
+
 ## 隐私要求
 
 - 不提交真实姓名、公司内部项目名、联系方式、简历、JD、逐字稿、录音、报告或模型缓存。

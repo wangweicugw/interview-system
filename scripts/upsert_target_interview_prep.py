@@ -13,7 +13,7 @@ from pathlib import Path
 
 from check_data_compatibility import require_store_compatible
 from check_target_interview_preps import SLUG_RE, duplicate_errors, load_existing, question_index, validate_payload
-from common import append_private_text, now_iso, read_json, write_json
+from common import commit_write_transaction, data_root_write_lock, now_iso, read_json, recover_write_transactions
 
 
 def digest(payload: dict) -> str:
@@ -66,32 +66,40 @@ def main() -> int:
     prep_dir = root / "profile" / "target-interview-preps"
     prep_dir.mkdir(parents=True, exist_ok=True)
     destination = prep_dir / f"{slug}.json"
-    rows = [(path, row) for path, row in load_existing(root) if path.resolve() != destination.resolve()]
-    rows.append((destination, payload))
-    duplicates = duplicate_errors(rows)
-    if duplicates:
-        raise RuntimeError("；".join(duplicates))
 
-    before = read_json(destination) if destination.is_file() else None
-    now = now_iso()
-    payload["updated_at"] = now
-    write_json(destination, payload)
-    append_private_text(
-        prep_dir / "revisions.jsonl",
-        json.dumps(
-            {
-                "recorded_at": now,
-                "action": "updated" if before else "created",
-                "slug": slug,
-                "before_sha256": digest(before) if before else None,
-                "after_sha256": digest(payload),
-                "before": before,
-                "after": payload,
-            },
-            ensure_ascii=False,
+    with data_root_write_lock(root):
+        recover_write_transactions(root)
+        rows = [(path, row) for path, row in load_existing(root) if path.resolve() != destination.resolve()]
+        rows.append((destination, payload))
+        duplicates = duplicate_errors(rows)
+        if duplicates:
+            raise RuntimeError("；".join(duplicates))
+        before = read_json(destination) if destination.is_file() else None
+        now = now_iso()
+        payload["updated_at"] = now
+        revision = json.dumps(
+                {
+                    "recorded_at": now,
+                    "action": "updated" if before else "created",
+                    "slug": slug,
+                    "before_sha256": digest(before) if before else None,
+                    "after_sha256": digest(payload),
+                    "before": before,
+                    "after": payload,
+                },
+                ensure_ascii=False,
         )
-        + "\n",
-    )
+        revisions_path = prep_dir / "revisions.jsonl"
+        previous_revisions = revisions_path.read_bytes() if revisions_path.is_file() else b""
+        transaction_id = f"target-prep-{slug}-{digest(payload)[:24]}"
+        commit_write_transaction(
+            root,
+            {
+                destination: (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+                revisions_path: previous_revisions + (revision + "\n").encode("utf-8"),
+            },
+            transaction_id,
+        )
 
     rendered = False
     warning = ""

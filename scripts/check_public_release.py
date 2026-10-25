@@ -17,7 +17,7 @@ from typing import Iterable
 
 ROOT_FILES = {
     ".gitignore", "SKILL.md", "start-interview-system.command", "README.md", "LICENSE", "LICENSE.md",
-    "CONTRIBUTING.md", "SECURITY.md", "requirements.lock", "requirements-optional.txt",
+    "CONTRIBUTING.md", "SECURITY.md", "requirements.lock", "requirements-optional.txt", "requirements-e2e.txt",
 }
 PRIVATE_DENYLIST_NAME = "release-denylist.json"
 SKIP_DIRECTORIES = {".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".venv", ".venv-whisperx", ".workbuddy-ai"}

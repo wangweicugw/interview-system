@@ -902,6 +902,46 @@ def practice_items(case_path: Path) -> list[dict[str, Any]]:
     return sorted(items, key=lambda item: item["rank"])
 
 
+def practice_attempt_history(case_path: Path, question_id: str, limit: int = 3) -> str:
+    """只读展示本题最近练习；正文来自私有路径并经过 HTML 转义。"""
+    root = case_path.parents[1]
+    qa = read_json(case_path / "qa-tree.json", {})
+    case_id = str(qa.get("case_id") or "")
+    log = root / "practice" / "attempts.jsonl"
+    if not case_id or not log.is_file():
+        return '<div class="practice-history" data-practice-history><p class="muted">暂无已保存练习记录。</p></div>'
+    rows: list[dict[str, Any]] = []
+    malformed = False
+    for line in log.read_text(encoding="utf-8").splitlines():
+        try:
+            item = json.loads(line)
+        except ValueError:
+            malformed = True
+            continue
+        if isinstance(item, dict) and item.get("case_id") == case_id and item.get("question_id") == question_id:
+            rows.append(item)
+    cards: list[str] = []
+    for item in rows[-limit:][::-1]:
+        answer_path = root / str(item.get("answer_path") or "")
+        try:
+            private_root = (root / "practice" / "private").resolve()
+            if private_root not in answer_path.resolve().parents:
+                raise ValueError("练习正文路径越界")
+            answer = answer_path.read_text(encoding="utf-8").strip()
+        except (OSError, ValueError):
+            answer = "练习正文暂时不可读，请检查本机档案。"
+        cards.append(
+            '<article class="practice-history-card">'
+            f'<p class="practice-history-meta"><strong>{html.escape(str(item.get("recorded_at") or "未知时间"))}</strong>'
+            f' · 自评 {html.escape(str(item.get("self_rating") or "未记录"))} · 待审核</p>'
+            f'<p>{html.escape(answer)}</p></article>'
+        )
+    warning = '<p class="notice">练习记录索引需检查，部分记录未能读取。</p>' if malformed else ""
+    return '<div class="practice-history" data-practice-history><h5>最近练习记录</h5>' + warning + (
+        "".join(cards) if cards else '<p class="muted">暂无已保存练习记录。</p>'
+    ) + '</div>'
+
+
 def case_answer_map(case_path: Path) -> dict[str, dict[str, Any]]:
     payload = read_json(case_path / "practice-answers.json", {})
     if not isinstance(payload, dict) or payload.get("schema_version") != 1:
@@ -1860,6 +1900,7 @@ def question_card(case: dict[str, Any], entry: dict[str, Any], segments: dict[st
         "复制内容含本题及相关场次的现场回答摘录、已有参考答案和你的补充；发送前可先核对。"
     )
     if not from_case:
+        practice_history = practice_attempt_history(case["path"], qid)
         practice_widget = (
             f'<div class="answer-workbench" data-practice-widget data-draft-key="supplement:{html.escape(str(case["case_id"]), quote=True)}:{html.escape(qid, quote=True)}" data-case-id="{html.escape(str(case["case_id"]), quote=True)}" '
             f'data-home-group-id="{html.escape(home_group_id, quote=True)}" '
@@ -1891,7 +1932,7 @@ def question_card(case: dict[str, Any], entry: dict[str, Any], segments: dict[st
             '</select></label><label>备注（可选）<input data-practice-note type="text" placeholder="例如：缺少指标或失败边界"></label>'
             '<button type="button" data-practice-save>保存本次练习</button>'
             '<p class="practice-save-note">优先直接保存到本机私有档案，状态会标为“已入库 · 待审核”。服务暂时不可用时，才下载“待应用”文件。</p>'
-            '<span data-practice-result></span></details></div>'
+            '<span data-practice-result></span></details>' + practice_history + '</div>'
         )
     if home_focus:
         source_label = f'{html.escape(str(case["company"]))} · {html.escape(str(case["round"]))}'
