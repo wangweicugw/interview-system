@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import os
 import json
+import hashlib
 import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -13,9 +15,9 @@ from unittest import mock
 SKILL = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SKILL / "scripts"))
 
-from build_release_package import build  # noqa: E402
+from build_release_package import _validate_archive, build  # noqa: E402
 from check_data_compatibility import scan_store  # noqa: E402
-from check_public_release import audit, scan_text  # noqa: E402
+from check_public_release import audit, load_private_markers, scan_text  # noqa: E402
 from common import SchemaCompatibilityError, write_json  # noqa: E402
 from demo_smoke import run_demo  # noqa: E402
 from pdf_ocr import _ocr_image  # noqa: E402
@@ -168,6 +170,51 @@ class ReleaseAndOcrTest(unittest.TestCase):
         blockers, _ = scan_text("workspace", "scripts/example.py", identifier.encode())
         self.assertTrue(any("面试场次 ID" in item for item in blockers))
         self.assertNotIn(identifier, str(blockers))
+
+    def test_release_audit_blocks_personal_contact_after_example(self) -> None:
+        personal_email = "actual.person" + "@" + "company.com"
+        content = ("demo@example.invalid\n" + personal_email + "\n").encode()
+        blockers, _ = scan_text("workspace", "README.md", content)
+        self.assertTrue(any("个人邮箱" in item for item in blockers))
+        self.assertNotIn(personal_email, str(blockers))
+
+    def test_release_audit_uses_private_denylist_and_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            marker_file = Path(temporary) / "denylist.json"
+            marker = "fictional-private-marker"
+            marker_file.write_text(
+                json.dumps({"schema_version": 1, "markers": [marker]}), encoding="utf-8"
+            )
+            with mock.patch.dict(os.environ, {"INTERVIEW_SYSTEM_RELEASE_DENYLIST": str(marker_file)}):
+                markers, errors = load_private_markers()
+                self.assertEqual(errors, [])
+                blockers, _ = scan_text("workspace", "README.md", marker.encode(), markers)
+                self.assertTrue(any("本机私有词表" in item for item in blockers))
+                self.assertNotIn(marker, str(blockers))
+                marker_file.unlink()
+                _, errors = load_private_markers()
+                self.assertTrue(errors)
+
+    def test_final_zip_scan_blocks_content_changed_after_source_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            marker = "fictional-private-marker"
+            marker_file = Path(temporary) / "denylist.json"
+            marker_file.write_text(
+                json.dumps({"schema_version": 1, "markers": [marker]}), encoding="utf-8"
+            )
+            archive_path = Path(temporary) / "release.zip"
+            body = marker.encode()
+            manifest = {
+                "files": [{"path": "README.md", "size": len(body), "sha256": hashlib.sha256(body).hexdigest()}]
+            }
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("interview-system/README.md", body)
+                archive.writestr("interview-system/MANIFEST.json", json.dumps(manifest))
+            with mock.patch("build_release_package.PACKAGE_FILES", ("README.md",)), mock.patch.dict(
+                os.environ, {"INTERVIEW_SYSTEM_RELEASE_DENYLIST": str(marker_file)}
+            ):
+                with self.assertRaisesRegex(ValueError, "发行 ZIP 隐私检查未通过"):
+                    _validate_archive(archive_path, manifest)
 
     def test_release_audit_distinguishes_staged_and_history(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

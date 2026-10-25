@@ -189,7 +189,7 @@ macOS 双击入口为 Skill 根目录的 [start-interview-system.command](start-
 
 ## 跨宿主分发
 
-公开发布源码前运行 `<python> <skill-dir>/scripts/check_public_release.py --strict`；它分别扫描工作区、实际 Git 暂存区和当前本地可见历史，但不代替专用密钥扫描与人工复核。真实面试数据目录不得作为源码仓库发布。发布检查器发现缺少许可证时应停止，由维护者选择许可证，不自动代选；发现历史风险时只报告，不自动改写历史。
+公开发布源码前运行 `<python> <skill-dir>/scripts/check_public_release.py --strict`，并启用 `.githooks/pre-push` 推送门禁；已配置私有档案时按 [CONTRIBUTING.md](CONTRIBUTING.md) 维护本机私有词表。检查覆盖工作区、实际 Git 暂存区、当前本地可见历史和最终发行 ZIP，但不能识别所有语义隐私；发布前仍须人工审阅。真实面试数据目录不得作为源码仓库发布。发现缺少许可证时停止，由维护者选择许可证；发现历史风险时只报告，不自动改写历史。
 
 项目只维护一个不针对宿主改写的发行包，不为 Codex、Claude、Trae、WorkBuddy 或其他软件复制入口、脚本和规则：
 

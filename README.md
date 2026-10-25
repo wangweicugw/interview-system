@@ -128,7 +128,7 @@ python3 scripts/backup_store.py create --root <data-root> --output <backup.age> 
 python3 scripts/backup_store.py verify --backup <backup.age> --identity <私钥文件>
 python3 scripts/backup_store.py restore --backup <backup.age> --identity <私钥文件> --target <空目录> --confirm-empty-target
 ```
-- 向 GitHub 发布前运行 `python3 scripts/check_public_release.py --strict`。工具分别报告工作区、实际 Git 暂存区和当前本地可见历史的覆盖状态，只输出文件位置、风险类别和行号，不打印命中的密钥或个人文本。检查不代替专用密钥扫描和人工复核；若发现历史泄露，它不会自动改写历史或强制推送。
+- 向 GitHub 发布前运行 `python3 scripts/check_public_release.py --strict`，并按 [贡献指南](CONTRIBUTING.md) 启用本地推送门禁及私有词表。工具分别报告工作区、实际 Git 暂存区和当前本地可见历史，只输出文件位置、风险类别和行号，不打印命中的密钥或个人文本。CI 在推送后复查；发行脚本还会检查最终 ZIP。自动检查无法识别所有私有语义，发布前须人工审阅；若发现历史泄露，工具不会自动改写历史或强制推送。
 
 对私人数据目录做只读自检：
 
