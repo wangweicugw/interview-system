@@ -75,7 +75,7 @@ def main() -> int:
                 browser = playwright.chromium.launch(headless=True)
                 page = browser.new_page()
                 page.goto(open_url)
-                page.locator('a[href="interview-preparations.html"]').click()
+                page.get_by_role("link", name="公司面试准备", exact=True).click()
                 page.get_by_text("打开该公司准备").click()
                 if not page.get_by_text("虚构 JD：熟悉缓存一致性与失败恢复。").is_visible():
                     raise AssertionError("准备页未展示虚构 JD")

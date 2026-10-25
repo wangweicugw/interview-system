@@ -4153,10 +4153,9 @@ def render_mistake_book(root: Path, cases: list[dict[str, Any]]) -> str:
             relation = str(source.get("relation") or "").strip()
             meta = " · ".join(part for part in (section, relation) if part)
             summary = str(source.get("summary") or "").strip()
-            rows.append(
-                f'<li>{head}{f"<span class=\"muted\"> · {html.escape(meta)}</span>" if meta else ""}'
-                f'{f"<p>{html.escape(summary)}</p>" if summary else ""}</li>'
-            )
+            meta_html = f'<span class="muted"> · {html.escape(meta)}</span>' if meta else ""
+            summary_html = f'<p>{html.escape(summary)}</p>' if summary else ""
+            rows.append(f'<li>{head}{meta_html}{summary_html}</li>')
         if not rows:
             return '<p class="muted">该结论没有登记外部来源。</p>'
         return f'<ul class="mistake-source-list">{"".join(rows)}</ul>'
