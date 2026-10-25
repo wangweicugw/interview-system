@@ -89,8 +89,13 @@ def main() -> int:
                 page.wait_for_timeout(1100)
                 widget.locator("[data-timer-stop]").click()
                 widget.locator("[data-practice-save]").click()
-                if not widget.locator("[data-practice-result]").filter(has_text="已入库").is_visible():
-                    raise AssertionError("浏览器页面未显示练习已入库")
+                page.wait_for_function("""() => {
+                    const text = document.querySelector('[data-practice-widget] [data-practice-result]')?.textContent || '';
+                    return text && text !== '正在写入本机私有档案…';
+                }""", timeout=10000)
+                result_text = widget.locator("[data-practice-result]").inner_text()
+                if "已入库" not in result_text:
+                    raise AssertionError(f"浏览器页面未显示练习已入库：{result_text}")
                 browser.close()
         finally:
             stop_server(process)

@@ -4181,12 +4181,13 @@ def render_mistake_book(root: Path, cases: list[dict[str, Any]]) -> str:
             str(item.get(field) or "") for field in
             ("question", "claim", "correction", "why_wrong", "memory_hook", "company", "role", "topic_label")
         ).lower()
+        version_html = f'<p class="mistake-meta">版本上下文：{html.escape(version)}</p>' if version else ""
         return (
             f'<article class="mistake-card" data-mistake-entry="{html.escape(entry_id, quote=True)}"'
             f' data-search="{html.escape(searchable, quote=True)}">'
             '<div class="mistake-head"><div>'
             f'<h3>{title}</h3><p class="mistake-meta">{html.escape(meta)}</p>'
-            f'{f"<p class=\"mistake-meta\">版本上下文：{html.escape(version)}</p>" if version else ""}'
+            f'{version_html}'
             '</div><span class="status incorrect">错误</span></div>'
             f'<blockquote class="mistake-claim"><strong>我的说法：</strong>{html.escape(str(item.get("claim") or ""))}</blockquote>'
             f'<p class="mistake-why"><strong>错在哪：</strong>{html.escape(str(item.get("why_wrong") or ""))}</p>'
