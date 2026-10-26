@@ -67,6 +67,7 @@ PACKAGE_FILES = (
     "scripts/check_data_compatibility.py",
     "scripts/check_target_interview_preps.py",
     "scripts/check_practice_answers.py",
+    "scripts/check_practice_answer_depth.py",
     "scripts/check_public_release.py",
     "scripts/check_question_clusters.py",
     "scripts/check_question_preferences.py",

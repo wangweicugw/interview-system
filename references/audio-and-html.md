@@ -71,7 +71,8 @@ WhisperX 中文对齐还需本地 `punkt_tab` 句子分割数据。默认查找 
 1. 使用 `scripts/register_reference_transcript.py` 原样复制到 `private/` 下的哈希快照，并记录来源属性（例如“用户提供、无时间戳、无标签”）。同一哈希不会重复登记，不同版本不会覆盖旧快照。
 2. 只用它核对专有名词、否定词、句子语义和漏识别内容；时间位置以带时间戳的原始音频转写为准。
 3. 不因参考稿存在就覆盖 `transcript.raw.json`、虚构分段时间或认定说话人。发生实质修订时，在 `transcript.revised.json` 和修订日志记录原因、证据和影响的 `segment_id`。
-4. 对被修订片段关联的 qa-tree、claims、scores、jd-matrix 和 profile-patch 重新核对。更正即使针对 `pending` 判断，也新增事件而非修改既有事件。
+4. 对被修订片段关联的 qa-tree、claims、scores、jd-matrix、profile-patch 和逐题参考答案重新核对；人名、公司名、数字、单位与否定词若仍冲突，显式保留待核，不用另一份 ASR 的流畅表述强行定稿。更正即使针对 `pending` 判断，也新增事件而非修改既有事件。
+5. 交付易读校对稿时明确它并非严格逐字稿；保留片段 ID、时间戳和说话人来源，修正可确认的术语、标点与断句，抽查技术词与否定词并查看最终 HTML。校对触发分析失效时，重算并校验 `analysis_status=current` 后才重建页面。
 
 登记参考稿示例：
 
