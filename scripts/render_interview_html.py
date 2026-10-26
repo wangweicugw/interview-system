@@ -90,6 +90,7 @@ TOPIC_LABELS = {
 
 def question_topic(question: dict[str, Any]) -> str:
     """Assign one explainable primary topic; this is a display heuristic, not a fact."""
+    # 公开源码只保留通用领域词，不放真实面试问法、城市或个人项目短语。
     # 先用受控词表收口，避免 design/architecture、coding 这类历史写法各自分支。
     category = question_taxonomy.normalize(question.get("category"))
     text = str(question.get("question") or "")
@@ -98,40 +99,38 @@ def question_topic(question: dict[str, Any]) -> str:
         return "algorithm"
     if category == "ai" or any(value in text for value in (" AI", "AI ", "Agent", "ReAct")):
         return "ai"
-    if any(value in text for value in ("消息队列", "消费方", "上游限流")):
+    if any(value in text for value in ("消息队列", "生产者", "消费者", "Kafka", "RocketMQ")):
         return "messaging"
-    if any(value in text for value in ("自我介绍", "个人经历", "近期工作", "近年负责")):
+    if any(value in text for value in ("自我介绍", "个人背景", "个人经历")):
         return "self-intro"
     if category == "career" or any(
-        value in text for value in ("离职", "职业规划", "薪资", "新机会", "岗位如何理解", "岗位的意愿", "愿意去杭州", "迁往杭州", "为什么考虑目标公司", "符合预期")
+        value in text for value in ("离职", "求职", "职业规划", "薪资", "薪酬", "入职", "工作地点")
     ):
         return "career"
     if category == "behavioral" or any(
-        value in text for value in ("团队如何组织", "团队分工", "职责边界", "不配合", "说服", "意见不一致", "推进里程碑")
+        value in text for value in ("团队", "协作", "沟通", "冲突", "领导力")
     ):
         return "collaboration"
-    if category == "product" or any(value in text for value in ("推广", "接入最大痛点", "业务信任", "方案目前怎样共存")):
+    if category == "product" or any(value in text for value in ("产品", "用户", "推广", "业务接入")):
         return "product"
-    if any(value in text for value in ("JVM", "GC", "CMS", "G1", "Java 线程", "HikariCP", "Druid", "DBCP", "垃圾回收", "JDK", "HashMap", "ConcurrentHashMap", "线程池", "volatile", "synchronized", "类加载")):
+    if any(value in text for value in ("JVM", "GC", "CMS", "G1", "Java", "HikariCP", "Druid", "DBCP", "垃圾回收", "JDK", "HashMap", "ConcurrentHashMap", "线程池", "volatile", "synchronized", "类加载")):
         return "java"
-    if any(value in text for value in ("监控", "告警", "排障", "故障处理", "定位和解决", "定位、止损", "磁盘一键清理", "核心指标", "业务不当使用")):
+    if any(value in text for value in ("监控", "告警", "排障", "故障", "可观测性")):
         return "observability"
-    if any(value in text for value in ("数据迁移", "迁移流程", "新旧库", "双写", "最终一致", "配置中心")):
+    if any(value in text for value in ("数据迁移", "双写", "最终一致", "配置中心")):
         return "migration"
-    if any(value in text for value in ("性能提升", "性能优化", "SQL 改写性能", "SQL 突然变慢", "慢 SQL", "执行计划", "IO 次数", "减少了什么成本", "重复计算", "大事务")):
+    if any(value in text for value in ("性能", "慢 SQL", "执行计划", "IO", "大事务")):
         return "performance"
-    if any(value in text for value in ("高可用", "容灾", "切流", "故障判定", "主库故障", "选主", "限流、降级和熔断", "数据丢失", "恢复时间", "读从读不到", "半同步", "单元化", "调整路由权重")):
+    if any(value in text for value in ("高可用", "容灾", "切流", "选主", "限流", "降级", "熔断", "数据丢失", "半同步", "单元化")):
         return "availability"
-    if any(value in text for value in ("分库分表", "分库/分表", "分片", "跨节点查询", "跨分片", "Group By", "Limit", "Distinct", "路由算法", "哈希扩容")):
+    if any(value in text for value in ("分库分表", "分库/分表", "分片", "Group By", "Limit", "Distinct", "路由算法", "哈希扩容")):
         return "sharding"
-    if any(value in text for value in ("Vitess", "ShardingSphere", "数据库中间件", "数据库代理层", "分布式数据库", "数据库网关", "VTTablet", "Gen4 Planner", "SQL 解析层", "语法树", "影子压测")):
+    if any(value in text for value in ("Vitess", "ShardingSphere", "数据库中间件", "数据库代理", "分布式数据库", "数据库网关", "VTTablet", "SQL 解析", "语法树")):
         return "middleware"
-    if any(value in text for value in ("MySQL", "InnoDB", "锁等待", "意向锁", "Gap Lock", "唯一索引", "主从延迟", "主从、主库")):
+    if any(value in text for value in ("MySQL", "InnoDB", "锁等待", "意向锁", "Gap Lock", "唯一索引", "主从延迟")):
         return "mysql"
     if category == "system_design":
         return "system-design"
-    if "关键技术工作" in text:
-        return "project-role"
     if category == "project":
         return "project-role"
     return "other"
@@ -150,6 +149,26 @@ def read_text(path: Path) -> str:
         return path.read_text(encoding="utf-8")
     except OSError:
         return ""
+
+
+def reference_source_notice(manifest: dict[str, Any]) -> str:
+    """Show newly registered references without presenting them as verified evidence."""
+    inputs = manifest.get("inputs", {})
+    if not isinstance(inputs, dict):
+        return ""
+    references = inputs.get("reference_transcripts")
+    if not isinstance(references, list) or not references:
+        return ""
+    latest = references[-1]
+    if not isinstance(latest, dict):
+        return ""
+    label_text = html.escape(str(latest.get("source_label") or "参考材料"))
+    use_text = html.escape(str(latest.get("use") or "仅作交叉核对"))
+    return (
+        '<div class="notice"><strong>补充材料已登记</strong>'
+        f'<p>共 {len(references)} 份；最新：{label_text}。{use_text}。'
+        '登记不会自动重算本场分析；下方完整复盘保留生成时的材料状态。</p></div>'
+    )
 
 
 def question_tag_map(root: Path) -> dict[tuple[str, str], dict[str, Any]]:
@@ -3991,6 +4010,7 @@ def render_case(case: dict[str, Any], cases: list[dict[str, Any]]) -> str:
 <p>{html.escape(case['datetime'])}</p><div class="meta">{meta}</div></div><aside class="case-hero-result"><span>本场结果</span><strong>{html.escape(display_result(str(case['result'])))}</strong><small>{html.escape(str(case['date']))} · {html.escape(str(case['round']))}</small></aside></header>
 {privacy_notice()}
 {warning_block}
+{reference_source_notice(manifest)}
 {review_focus(review)}
 <section id="performance" class="case-section performance-section"><div class="section-heading"><div><span class="section-kicker">快速概览</span><h2>表现概览</h2></div><span class="section-note">只看本场，不做跨岗位排名</span></div><div class="grid scores">{score_cards(scores.get('overall', {}))}</div></section>
 {render_case_practice(case)}

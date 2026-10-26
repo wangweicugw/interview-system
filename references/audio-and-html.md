@@ -66,6 +66,8 @@ WhisperX 中文对齐还需本地 `punkt_tab` 句子分割数据。默认查找 
 
 若材料是 ZIP，先列出成员并拒绝绝对路径、`..`、符号链接、超大或数量异常的成员；只提取用户指定或唯一的 Markdown 到临时目录。不要执行压缩包内文件，不要把图片 OCR 结果当成更高优先级证据。再按下述流程登记 Markdown 快照。
 
+飞书 `docx/` 链接属于云文档，不等同于妙记原始转写；浏览器登录态与 API 凭证也是两套机制。偶发导入优先使用用户导出的 ZIP，保留原 ZIP 于私有目录并按上段只提取 Markdown。若用户要求长期自动同步，可另行接入[飞书新版文档 OpenAPI](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/list)：先取得应用和文档的读取权限，再通过用户授权的 `user_access_token` 读取纯文本或文档块；应用身份的 `tenant_access_token` 不会自动获得个人文档访问权。凭证与刷新信息只能留在本机私有凭据存储，不能写入 Skill、档案 JSON、日志或公开仓库。API 读取结果仍需原样登记为二级证据，不替代原始转写。
+
 1. 使用 `scripts/register_reference_transcript.py` 原样复制到 `private/` 下的哈希快照，并记录来源属性（例如“用户提供、无时间戳、无标签”）。同一哈希不会重复登记，不同版本不会覆盖旧快照。
 2. 只用它核对专有名词、否定词、句子语义和漏识别内容；时间位置以带时间戳的原始音频转写为准。
 3. 不因参考稿存在就覆盖 `transcript.raw.json`、虚构分段时间或认定说话人。发生实质修订时，在 `transcript.revised.json` 和修订日志记录原因、证据和影响的 `segment_id`。
