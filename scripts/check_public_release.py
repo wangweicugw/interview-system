@@ -16,7 +16,7 @@ from typing import Iterable
 
 
 ROOT_FILES = {
-    ".gitignore", "SKILL.md", "start-interview-system.command", "README.md", "LICENSE", "LICENSE.md",
+    ".gitignore", "AGENTS.md", "SKILL.md", "start-interview-system.command", "README.md", "LICENSE", "LICENSE.md",
     "CONTRIBUTING.md", "SECURITY.md", "requirements.lock", "requirements-optional.txt", "requirements-e2e.txt",
 }
 PRIVATE_DENYLIST_NAME = "release-denylist.json"

@@ -20,6 +20,7 @@ PACKAGE_ROOT = PurePosixPath("interview-system")
 EXCLUDED_NAMES = {"__pycache__", ".DS_Store"}
 PACKAGE_FILES = (
     "SKILL.md",
+    "AGENTS.md",
     ".githooks/pre-push",
     "start-interview-system.command",
     "README.md",
