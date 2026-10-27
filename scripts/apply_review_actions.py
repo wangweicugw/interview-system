@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -16,9 +17,16 @@ from check_data_compatibility import require_store_compatible
 from check_question_clusters import validate_question_clusters
 from check_question_preferences import validate_question_preferences
 from check_standard_answers import TOPICS, validate_standard_answers
-from common import append_private_text, now_iso, write_json
-from profile_store import append_event, content_hash, latest_events, load_revisions, rebuild_profile
-from record_practice_attempt import _question, record_attempt
+from common import (
+    commit_write_transaction,
+    data_root_write_lock,
+    now_iso,
+    read_json,
+    recover_write_transactions,
+    write_json,
+)
+from profile_store import content_hash, event_log_path, latest_events, load_revisions, rebuild_profile
+from record_practice_attempt import _question, _record_attempt_unlocked
 
 
 STATUSES = {"pending", "confirmed", "rejected"}
@@ -121,8 +129,31 @@ def _validate_staged(root: Path, answers: dict[str, Any], clusters: dict[str, An
             raise RuntimeError("确认操作校验失败：" + "；".join(issues))
 
 
-def apply_actions(root: Path, action_file: Path) -> dict[str, Any]:
+def _apply_actions_unlocked(root: Path, action_file: Path) -> dict[str, Any]:
     require_store_compatible(root)
+    transaction_id = "review-" + hashlib.sha256(
+        action_file.read_bytes()
+    ).hexdigest()
+    transaction_path = root / "logs" / "write-transactions" / f"{transaction_id}.json"
+    if transaction_path.is_file():
+        completed = read_json(transaction_path)
+        if (
+            completed.get("state") == "done"
+            and isinstance(completed.get("result"), dict)
+            and (
+                completed["result"].get("status") == "partial"
+                or completed["result"].get("derived_refresh_required") is True
+            )
+        ):
+            result = completed["result"]
+            if result.get("profile_events") or result.get("derived_refresh_required"):
+                try:
+                    rebuild_profile(root)
+                except (OSError, ValueError, RuntimeError):
+                    return {**result, "status": "partial", "derived_refresh_required": True}
+                result = {**result, "status": "applied", "derived_refresh_required": False}
+                write_json(transaction_path, {**completed, "result": result})
+            return result
     preference_issues = validate_question_preferences(root)
     if preference_issues:
         raise RuntimeError("已有题目偏好状态校验失败：" + "；".join(preference_issues))
@@ -330,6 +361,10 @@ def apply_actions(root: Path, action_file: Path) -> dict[str, Any]:
                 raise RuntimeError(f"{case_id}/{question_id} 的练习时长无效")
             if type(rating) is not int or not 1 <= rating <= 5:
                 raise RuntimeError(f"{case_id}/{question_id} 的自评分无效")
+            if not action.get("attempt_id"):
+                action["attempt_id"] = "practice-" + hashlib.sha256(
+                    f"{transaction_id}:{index}".encode("utf-8")
+                ).hexdigest()[:16]
             normalized.append(action)
         elif kind == "question_preference":
             target_type = str(action.get("target_type") or "")
@@ -491,14 +526,14 @@ def apply_actions(root: Path, action_file: Path) -> dict[str, Any]:
 
     if answer_revisions or cluster_revisions:
         _validate_staged(root, answers_copy, clusters_copy)
-    if answer_revisions:
-        write_json(answers_path, answers_copy)
-    if cluster_revisions:
-        write_json(clusters_path, clusters_copy)
-    if preference_revisions:
-        write_json(preferences_path, preferences_copy)
-
-    os.umask(0o077)
+    updates: dict[Path, bytes] = {}
+    for path, value in (
+        (answers_path, answers_copy),
+        (clusters_path, clusters_copy),
+        (preferences_path, preferences_copy),
+    ):
+        if path.exists() or path in {answers_path, clusters_path, preferences_path}:
+            updates[path] = (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     for relative, revisions in (
         ("profile/standard-answer-revisions.jsonl", answer_revisions),
         ("profile/question-cluster-revisions.jsonl", cluster_revisions),
@@ -506,16 +541,18 @@ def apply_actions(root: Path, action_file: Path) -> dict[str, Any]:
     ):
         if revisions:
             path = root / relative
-            append_private_text(
-                path,
-                "".join(json.dumps(revision, ensure_ascii=False) + "\n" for revision in revisions),
-            )
-    for event in profile_revisions:
-        append_event(root, event)
+            previous = path.read_bytes() if path.is_file() else b""
+            updates[path] = previous + "".join(
+                json.dumps(revision, ensure_ascii=False) + "\n" for revision in revisions
+            ).encode("utf-8")
     if profile_revisions:
-        rebuild_profile(root)
+        path = event_log_path(root)
+        previous = path.read_bytes() if path.is_file() else b""
+        updates[path] = previous + "".join(
+            json.dumps(event, ensure_ascii=False) + "\n" for event in profile_revisions
+        ).encode("utf-8")
     for action in practice_events:
-        record_attempt(
+        _record_attempt_unlocked(
             root,
             case_id=str(action["case_id"]),
             question_id=str(action["question_id"]),
@@ -524,8 +561,9 @@ def apply_actions(root: Path, action_file: Path) -> dict[str, Any]:
             self_rating=int(action["self_rating"]),
             note=str(action.get("note") or ""),
             attempt_id=str(action.get("attempt_id") or "") or None,
+            transaction_updates=updates,
         )
-    return {
+    result = {
         "status": "applied",
         "actions": len(normalized),
         "standard_answers": len(answer_revisions),
@@ -534,6 +572,24 @@ def apply_actions(root: Path, action_file: Path) -> dict[str, Any]:
         "profile_events": len(profile_revisions),
         "practice_attempts": len(practice_events),
     }
+    commit_write_transaction(root, updates, transaction_id, result=result)
+    if profile_revisions:
+        # 核心已提交；派生档案失败时明确标记，重试会继续重建。
+        try:
+            rebuild_profile(root)
+        except (OSError, ValueError, RuntimeError):
+            partial = {**result, "status": "partial", "derived_refresh_required": True}
+            journal = read_json(transaction_path)
+            write_json(transaction_path, {**journal, "result": partial})
+            return partial
+    return result
+
+
+def apply_actions(root: Path, action_file: Path) -> dict[str, Any]:
+    """统一入口：恢复遗留事务，再取得跨进程数据根写锁。"""
+    with data_root_write_lock(root):
+        recover_write_transactions(root)
+        return _apply_actions_unlocked(root, action_file)
 
 
 def main() -> int:

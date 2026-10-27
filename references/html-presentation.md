@@ -13,6 +13,7 @@
 - 已生成答案：`<data-root>/interview-answers.html`，集中搜索和展开跨场参考答案、逐题参考答案与延伸追问答案；从首页题目旁的链接进入。
 - 独立题库：`<data-root>/interview-question-bank.html`，提供全量题目、题目搜索、主题书签和练习控件；从首页练习区按需进入。
 - 待确认审核：`<data-root>/interview-pending-review.html`。
+- 错题本：`<data-root>/interview-mistakes.html`，只收 `verdict=incorrect` 的 claim，按知识主题分组；每条并列「我的说法」「错在哪」「正确说法」「记忆点」「复述提示」和来源。正确说法与记忆点来自人工整理的 `profile/mistake-book-notes.json`，不是模型生成；未整理的条目只展示 claim 自带说明与来源。页面提供搜索和「只看未复习」，「已复习」只写浏览器本地存储，不写档案。错题条数与当前 `claims.json` 不一致时页面必须提示重跑 `build_mistake_book.py`。
 - 公司面试准备：`<data-root>/interview-preparations.html` 只列目标公司；每家公司使用独立的 `<data-root>/interview-preparation-<slug>.html`，先展示该岗位保存的 JD 文字与来源，再展示题目与答案。未保存 JD 时明确提示；截图人工转写或 OCR 文本不得冒充官方原文。
 - 每场页面必须包含可搜索的历史面试区；统一总览在折叠的历史档案区按公司、岗位、轮次、结果和复盘关键词搜索场次，并从练习区进入独立题库。
 - 每场页面在 JD 能力矩阵前展示本场导入并保存的 JD 文本；保留原文段落与换行，扫描版标明 OCR，历史截图人工转写标明来源，缺失或提取失败时明确提示。JD 原文与能力矩阵不能混为一谈。
@@ -35,7 +36,7 @@
 - 存在 `profile/review-plan.json` 时，展示前十项优先练习与按日期、主题聚合的评分快照，并明确这不是能力认证或通过率预测。
 - 如需让历史首页的练习题对应长期待办，可在私有数据目录的 `profile/practice-focus.json` 保存 `{"schema_version":1,"groups":[{"title":"待办标题","questions":[{"case_id":"...","question_id":"q-001","knowledge_point":"知识点","followups":["延伸追问 1","延伸追问 2"]}]}]}`。只存题目引用及新编练习内容，不复制或重写原题；渲染器从各场问答树和逐字稿取原题与证据。无有效配置时每场自动选一道技术或编码题。
 - 优先展示问答树 `parent_id` 对应的追问，并链接到该题；它仍可能是整理稿，证据强度以单场来源为准。新编追问必须写明“延伸追问 · 练习题，非面试原话”，围绕已保存评分备注、技术核验和相关 JD，按原理、边界、证据或测试逐层深入；不得写入 `qa-tree.json` 冒充真实提问。知识点与追问可同时出现在历史页和对应单场页。
-- 用户要参考答案时，逐题保存 `reference_answer`，延伸追问按顺序保存 `followup_answers`，格式见 [数据契约](schemas.md)。页面折叠展示并标明“AI 整理的参考答法，非当场回答”。技术结论先按 [技术事实核验](fact-checking.md) 打开官方来源确认；版本不明时限定适用版本，不把单一指标写成确定根因。用户要求的范围必须用 `check_practice_answers.py` 校验，无缺项后才能交付。
+- 用户要参考答案时，逐题保存 `reference_answer`，延伸追问按顺序保存 `followup_answers`，格式见 [数据契约](schemas.md)。30 秒版应是能直接说出的结论与关键点；2 分钟版须增加实际请求路径或操作顺序、一个可检验例子、条件和失败边界。经历题用已确认事实展开个人行动，证据不足时留待补，不把通用机制说成个人业绩。写入后运行 `check_practice_answer_depth.py`，对过短、相似或只有写作指令的稿子逐条人工改写；长度警告只是线索，不替代语义判断。页面折叠展示并标明“AI 整理的参考答法，非当场回答”。技术结论先按 [技术事实核验](fact-checking.md) 打开官方来源确认；版本不明时限定适用版本，不把单一指标写成确定根因。用户要求的范围必须用 `check_practice_answers.py` 校验，无缺项后才能交付。
 
 结构化 JSON、`review.md` 和原始材料仍是事实源。HTML 只是派生视图，不得反向覆盖它们。
 

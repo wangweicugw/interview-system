@@ -12,7 +12,14 @@ from pathlib import Path
 from typing import Any
 
 from check_data_compatibility import require_store_compatible
-from common import append_private_text, now_iso, sha256_text, write_private_text
+from common import (
+    commit_write_transaction,
+    data_root_write_lock,
+    finalize_write_transaction,
+    now_iso,
+    recover_write_transactions,
+    sha256_text,
+)
 
 
 def _question(root: Path, case_id: str, question_id: str) -> dict[str, Any] | None:
@@ -33,7 +40,7 @@ def _question(root: Path, case_id: str, question_id: str) -> dict[str, Any] | No
     return None
 
 
-def record_attempt(
+def _record_attempt_unlocked(
     root: Path,
     *,
     case_id: str,
@@ -43,6 +50,7 @@ def record_attempt(
     self_rating: int,
     note: str = "",
     attempt_id: str | None = None,
+    transaction_updates: dict[Path, bytes] | None = None,
 ) -> dict[str, Any]:
     require_store_compatible(root)
     question = _question(root, case_id, question_id)
@@ -99,7 +107,6 @@ def record_attempt(
             if sha256_text(existing_text) != existing.get("answer_sha256"):
                 raise RuntimeError("练习记录正文已损坏，请重新保存本次练习")
             return {**existing, "deduplicated": True}
-    write_private_text(answer_path, answer + "\n")
     event = {
         "schema_version": 1,
         "attempt_id": attempt_id,
@@ -114,8 +121,40 @@ def record_attempt(
         "answer_path": str(answer_path.relative_to(root)),
         "review_status": "pending",
     }
-    append_private_text(log, json.dumps(event, ensure_ascii=False) + "\n")
+    previous = transaction_updates.get(log) if transaction_updates is not None else None
+    if previous is None:
+        previous = log.read_bytes() if log.is_file() else b""
+    prepared = {
+        answer_path: (answer + "\n").encode("utf-8"),
+        log: previous + (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8"),
+    }
+    if transaction_updates is not None:
+        transaction_updates.update(prepared)
+    else:
+        transaction_id = f"practice-{attempt_id.removeprefix('practice-')}"
+        commit_write_transaction(root, prepared, transaction_id, finalize=False)
+        finalize_write_transaction(root, transaction_id, {"status": "recorded", **event})
     return event
+
+
+def record_attempt(
+    root: Path,
+    *,
+    case_id: str,
+    question_id: str,
+    answer: str,
+    duration_seconds: int,
+    self_rating: int,
+    note: str = "",
+    attempt_id: str | None = None,
+) -> dict[str, Any]:
+    with data_root_write_lock(root):
+        recover_write_transactions(root)
+        return _record_attempt_unlocked(
+            root, case_id=case_id, question_id=question_id, answer=answer,
+            duration_seconds=duration_seconds, self_rating=self_rating,
+            note=note, attempt_id=attempt_id,
+        )
 
 
 def main() -> int:

@@ -16,10 +16,11 @@ from typing import Iterable
 
 
 ROOT_FILES = {
-    ".gitignore", "SKILL.md", "README.md", "LICENSE", "LICENSE.md",
-    "CONTRIBUTING.md", "SECURITY.md", "requirements.lock", "requirements-optional.txt",
+    ".gitignore", "AGENTS.md", "SKILL.md", "start-interview-system.command", "README.md", "LICENSE", "LICENSE.md",
+    "CONTRIBUTING.md", "SECURITY.md", "requirements.lock", "requirements-optional.txt", "requirements-e2e.txt",
 }
-SKIP_DIRECTORIES = {".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".venv", ".venv-whisperx"}
+PRIVATE_DENYLIST_NAME = "release-denylist.json"
+SKIP_DIRECTORIES = {".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".venv", ".venv-whisperx", ".workbuddy-ai"}
 PRIVATE_DIRECTORIES = {"private", "interviews", "profile", "events", "logs", "models", "practice"}
 SUSPICIOUS_BINARY_SUFFIXES = {
     ".aac", ".docx", ".flac", ".html", ".m4a", ".mp3", ".mp4", ".pdf", ".wav",
@@ -43,6 +44,7 @@ GENERIC_SECRET = re.compile(
     r"\s*[:=]\s*['\"]([^'\"\s]{20,})['\"]"
 )
 PERSONAL_PATH = re.compile(r"/(?:Users|home)/[^/\s'\"]+")
+INTERVIEW_CASE_ID = re.compile(r"\bint-20\d{6}-[0-9a-f]{8}\b")
 EMAIL = re.compile(r"(?i)(?<![\w.+-])[\w.+-]+@[A-Z0-9.-]+\.[A-Z]{2,}(?![\w.-])")
 PHONE_CN = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
 ID_CN = re.compile(
@@ -58,6 +60,8 @@ def allowed(relative: Path | PurePosixPath) -> bool:
     if len(parts) == 2:
         parent, name = parts
         return (
+            (parent == ".githooks" and name == "pre-push")
+            or
             (parent == "agents" and name == "openai.yaml")
             or (parent == "assets" and name in {"algorithm-problems.json", "demo-case.json"})
             or (parent == "references" and name.endswith(".md"))
@@ -99,7 +103,42 @@ def line_number(text: str, offset: int) -> int:
     return text.count("\n", 0, offset) + 1
 
 
-def scan_text(scope: str, locator: str, content: bytes) -> tuple[list[str], list[str]]:
+def load_private_markers() -> tuple[tuple[str, ...], list[str]]:
+    """读取本机私有词表；已配置档案时，缺失或无效均阻断发布。"""
+    configured = os.environ.get("INTERVIEW_SYSTEM_RELEASE_DENYLIST")
+    if configured:
+        path = Path(configured).expanduser()
+    else:
+        config = Path.home() / ".config/interview-system/data-root"
+        if not config.exists():
+            return (), []
+        try:
+            data_root = Path(config.read_text(encoding="utf-8").strip()).expanduser()
+            if not data_root.is_absolute():
+                raise ValueError("档案目录不是绝对路径")
+            path = data_root / "profile/private" / PRIVATE_DENYLIST_NAME
+        except (OSError, UnicodeError, ValueError):
+            return (), ["[private-denylist] 无法读取本机档案配置"]
+    try:
+        if not path.is_absolute() or not path.is_file() or path.is_symlink():
+            raise ValueError("私有词表不存在或不是普通文件")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+            raise ValueError("私有词表版本无效")
+        markers = payload.get("markers")
+        if not isinstance(markers, list) or not markers or any(
+            not isinstance(item, str) or len(item.strip()) < 2 or item != item.strip()
+            for item in markers
+        ):
+            raise ValueError("私有词表内容无效")
+        return tuple(dict.fromkeys(markers)), []
+    except (OSError, UnicodeError, ValueError, json.JSONDecodeError):
+        return (), ["[private-denylist] 本机私有词表缺失或无效；停止发布"]
+
+
+def scan_text(
+    scope: str, locator: str, content: bytes, private_markers: Iterable[str] = (),
+) -> tuple[list[str], list[str]]:
     blockers: list[str] = []
     warnings: list[str] = []
     if b"\x00" in content:
@@ -129,16 +168,27 @@ def scan_text(scope: str, locator: str, content: bytes) -> tuple[list[str], list
         blockers.append(
             f"[{scope}] 疑似个人绝对路径：{locator}:第{line_number(text, path_match.start())}行"
         )
+    case_match = INTERVIEW_CASE_ID.search(text)
+    if case_match:
+        blockers.append(
+            f"[{scope}] 疑似真实面试场次 ID：{locator}:第{line_number(text, case_match.start())}行"
+        )
+    folded = text.casefold()
+    for marker in private_markers:
+        offset = folded.find(marker.casefold())
+        if offset >= 0:
+            blockers.append(f"[{scope}] 命中本机私有词表：{locator}:第{line_number(text, offset)}行")
+            break
     for label, pattern in (("邮箱", EMAIL), ("手机号", PHONE_CN), ("身份证号", ID_CN)):
-        match = pattern.search(text)
-        if label == "邮箱" and match and match.group(0).lower().endswith(
-            (".example", ".invalid", ".localhost", ".test")
-        ):
-            continue
-        if match:
-            warnings.append(
-                f"[{scope}] 疑似个人{label}，需人工复核：{locator}:第{line_number(text, match.start())}行"
+        for match in pattern.finditer(text):
+            if label == "邮箱" and match.group(0).lower().endswith(
+                (".example", ".invalid", ".localhost", ".test")
+            ):
+                continue
+            blockers.append(
+                f"[{scope}] 疑似个人{label}：{locator}:第{line_number(text, match.start())}行"
             )
+            break
     return blockers, warnings
 
 
@@ -150,7 +200,7 @@ def suspicious_file(scope: str, path: PurePosixPath, locator: str) -> str | None
     return None
 
 
-def audit_workspace(source: Path) -> tuple[list[str], list[str], list[str], list[str]]:
+def audit_workspace(source: Path, private_markers: Iterable[str] = ()) -> tuple[list[str], list[str], list[str], list[str]]:
     blockers: list[str] = []
     warnings: list[str] = []
     public_files: list[str] = []
@@ -186,7 +236,7 @@ def audit_workspace(source: Path) -> tuple[list[str], list[str], list[str], list
             if path.stat().st_size > MAX_TEXT_BYTES:
                 blockers.append(f"[workspace] 公开文件超过 2 MB，需人工核对：{relative_text}")
                 continue
-            file_blockers, file_warnings = scan_text("workspace", relative_text, path.read_bytes())
+            file_blockers, file_warnings = scan_text("workspace", relative_text, path.read_bytes(), private_markers)
             blockers.extend(file_blockers)
             warnings.extend(file_warnings)
             public_files.append(relative_text)
@@ -197,12 +247,12 @@ def decode_z_paths(raw: bytes) -> list[str]:
     return [item.decode("utf-8", "surrogateescape") for item in raw.split(b"\0") if item]
 
 
-def audit_staged(source: Path) -> tuple[list[str], list[str], int]:
+def audit_staged(source: Path, private_markers: Iterable[str] = ()) -> tuple[list[str], list[str], int]:
     blockers: list[str] = []
     warnings: list[str] = []
     listed = run_git(source, "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR")
     if listed.returncode != 0:
-        return blockers, ["[staged] 无法读取 Git 暂存区"], 0
+        return ["[staged] 无法读取 Git 暂存区"], warnings, 0
     paths = decode_z_paths(listed.stdout)
     for path_text in paths:
         relative = PurePosixPath(path_text)
@@ -220,7 +270,7 @@ def audit_staged(source: Path) -> tuple[list[str], list[str], int]:
         if len(shown.stdout) > MAX_TEXT_BYTES:
             blockers.append(f"[staged] 文件超过 2 MB，需人工核对：{locator}")
             continue
-        file_blockers, file_warnings = scan_text("staged", locator, shown.stdout)
+        file_blockers, file_warnings = scan_text("staged", locator, shown.stdout, private_markers)
         blockers.extend(file_blockers)
         warnings.extend(file_warnings)
     return blockers, warnings, len(paths)
@@ -229,13 +279,13 @@ def audit_staged(source: Path) -> tuple[list[str], list[str], int]:
 def iter_history_blobs(source: Path) -> Iterable[tuple[str, str, str]]:
     revisions = run_git(source, "rev-list", "--all", text=True)
     if revisions.returncode != 0:
-        return
+        raise RuntimeError("无法枚举 Git 历史")
     seen: set[tuple[str, str]] = set()
     count = 0
     for revision in revisions.stdout.splitlines():
         tree = run_git(source, "ls-tree", "-r", "-z", "--full-tree", revision)
         if tree.returncode != 0:
-            continue
+            raise RuntimeError("无法读取 Git 历史树")
         for entry in tree.stdout.split(b"\0"):
             if not entry or b"\t" not in entry:
                 continue
@@ -255,7 +305,7 @@ def iter_history_blobs(source: Path) -> Iterable[tuple[str, str, str]]:
             yield revision, object_id, path
 
 
-def audit_history(source: Path) -> tuple[list[str], list[str], int]:
+def audit_history(source: Path, private_markers: Iterable[str] = ()) -> tuple[list[str], list[str], int]:
     blockers: list[str] = []
     warnings: list[str] = []
     scanned = 0
@@ -283,7 +333,7 @@ def audit_history(source: Path) -> tuple[list[str], list[str], int]:
             if body.returncode != 0:
                 blockers.append(f"[history] 无法读取 Git 对象：{locator}")
                 continue
-            file_blockers, file_warnings = scan_text("history", locator, body.stdout)
+            file_blockers, file_warnings = scan_text("history", locator, body.stdout, private_markers)
             blockers.extend(file_blockers)
             warnings.extend(file_warnings)
     except RuntimeError as exc:
@@ -306,6 +356,8 @@ def audit(
     warnings: list[str] = []
     public_files: list[str] = []
     coverage: dict[str, object] = {}
+    private_markers, marker_errors = load_private_markers()
+    blockers.extend(marker_errors)
 
     if not privacy_only:
         if not (source / "SKILL.md").is_file():
@@ -318,7 +370,7 @@ def audit(
             warnings.append("[workspace] 缺少自动测试工作流")
 
     if "workspace" in selected:
-        found, cautions, public_files, skipped = audit_workspace(source)
+        found, cautions, public_files, skipped = audit_workspace(source, private_markers)
         blockers.extend(found)
         warnings.extend(cautions)
         coverage["workspace"] = {"status": "scanned", "file_count": len(public_files)}
@@ -334,10 +386,10 @@ def audit(
             warnings.append(f"[{scope}] 未扫描：源目录不是 Git 根目录")
             continue
         if scope == "staged":
-            found, cautions, count = audit_staged(source)
+            found, cautions, count = audit_staged(source, private_markers)
             coverage[scope] = {"status": "scanned", "file_count": count}
         else:
-            found, cautions, count = audit_history(source)
+            found, cautions, count = audit_history(source, private_markers)
             coverage[scope] = {"status": "scanned", "blob_path_count": count}
         blockers.extend(found)
         warnings.extend(cautions)

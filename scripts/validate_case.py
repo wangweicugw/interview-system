@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+import question_taxonomy
 from analysis_state import current_errors, fingerprint, refresh_errors
 from common import SchemaCompatibilityError, now_iso, read_json, read_supported_text, sha256_file, sha256_text, write_json
 
@@ -15,7 +16,7 @@ from common import SchemaCompatibilityError, now_iso, read_json, read_supported_
 QUESTION_DIMS = {"correctness", "completeness", "structure", "clarity"}
 OVERALL_DIMS = {"professional", "credibility", "structure", "stability"}
 KNOWLEDGE_DIMS = {"accuracy", "completeness", "retrieval_stability", "expression"}
-VERDICTS = {"correct", "partial", "incorrect", "unverified"}
+VERDICTS = {"correct", "partial", "incorrect", "unverified", "personal"}
 CHANGE_TYPES = {
     "answer_version",
     "knowledge_state",
@@ -470,6 +471,11 @@ def main() -> int:
         confidence = question.get("relation_confidence")
         if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
             errors.append(f"{qid} 的 relation_confidence 必须为 0–1")
+        if not question_taxonomy.is_canonical(question.get("category")):
+            errors.append(
+                f"{qid} 的 category 不在受控词表内：{question.get('category')!r}"
+                f"（可用：{'、'.join(sorted(question_taxonomy.CATEGORIES))}）"
+            )
         for field in ("question_evidence", "answer_evidence"):
             for segment_id in question.get(field, []):
                 if segment_id not in segment_id_set:
@@ -490,8 +496,12 @@ def main() -> int:
             if segment_id not in segment_id_set:
                 errors.append(f"{cid} 引用了未知片段 {segment_id}")
         sources = claim.get("sources", [])
-        if verdict != "unverified" and not sources:
+        # personal 指只有本人能确认的经历、内部数据或未公开实现，外部没有可引用的来源，
+        # 因此不要求来源；其余已下判定的类型必须有来源，避免用印象冒充核验。
+        if verdict not in {"unverified", "personal"} and not sources:
             errors.append(f"{cid} 的 {verdict} 判定缺少来源")
+        if verdict == "personal" and not str(claim.get("explanation") or "").strip():
+            errors.append(f"{cid} 的 personal 判定必须说明为何无法外部核验")
         for source in sources:
             for field in ("title", "section", "accessed_at", "relation", "summary"):
                 if not str(source.get(field, "")).strip():

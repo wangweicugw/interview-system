@@ -63,6 +63,26 @@ class PracticeAnswerScopeTest(unittest.TestCase):
             self.assertEqual(single["case"], "case-a")
             self.assertEqual(single["main_questions"], 1)
 
+    def test_case_scope_ignores_invalid_focus_from_another_case(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            case = build_case(root, "case-a", "case-a", ["q-001"])
+            write_json(case / "practice-answers.json", {
+                "schema_version": 1,
+                "questions": [{"question_id": "q-001", "reference_answer": answer("要点", "完整答法")}],
+            })
+            (root / "profile").mkdir()
+            write_json(root / "profile" / "practice-focus.json", {
+                "groups": [{"questions": [{"case_id": "other-case", "question_id": "missing"}]}],
+            })
+
+            single = check(root, "all", "case-a")
+            self.assertEqual(single["status"], "valid", single["errors"])
+            self.assertEqual(single["main_questions"], 1)
+            whole_store = check(root, "all")
+            self.assertEqual(whole_store["status"], "invalid")
+            self.assertIn("other-case/missing", " ".join(whole_store["errors"]))
+
     def test_case_scope_accepts_directory_name_and_reports_unknown(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

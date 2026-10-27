@@ -24,12 +24,15 @@ from check_question_tags import validate_question_tags
 from check_standard_answers import validate_standard_answers
 from labels_zh import label, round_label
 
+import question_taxonomy
+
 
 CASE_HTML = "interview-review.html"
 HISTORY_HTML = "interview-history.html"
 QUESTION_BANK_HTML = "interview-question-bank.html"
 ANSWERS_HTML = "interview-answers.html"
 PENDING_REVIEW_HTML = "interview-pending-review.html"
+MISTAKE_BOOK_HTML = "interview-mistakes.html"
 PREPARATIONS_HTML = "interview-preparations.html"
 PREPARATION_HTML_PREFIX = "interview-preparation-"
 
@@ -60,6 +63,7 @@ VERDICT_LABELS = {
     "partial": "部分正确",
     "incorrect": "错误",
     "unverified": "未核验",
+    "personal": "个人经历，无法外部核验",
 }
 
 TOPIC_LABELS = {
@@ -86,48 +90,48 @@ TOPIC_LABELS = {
 
 def question_topic(question: dict[str, Any]) -> str:
     """Assign one explainable primary topic; this is a display heuristic, not a fact."""
-    category = str(question.get("category") or "").lower()
+    # 公开源码只保留通用领域词，不放真实面试问法、城市或个人项目短语。
+    # 先用受控词表收口，避免 design/architecture、coding 这类历史写法各自分支。
+    category = question_taxonomy.normalize(question.get("category"))
     text = str(question.get("question") or "")
 
-    if category in {"algorithm", "coding"}:
+    if category == "algorithm":
         return "algorithm"
     if category == "ai" or any(value in text for value in (" AI", "AI ", "Agent", "ReAct")):
         return "ai"
-    if category == "messaging" or any(value in text for value in ("消息队列", "消费方", "上游限流")):
+    if any(value in text for value in ("消息队列", "生产者", "消费者", "Kafka", "RocketMQ")):
         return "messaging"
-    if any(value in text for value in ("自我介绍", "个人经历", "近期工作", "近年负责")):
+    if any(value in text for value in ("自我介绍", "个人背景", "个人经历")):
         return "self-intro"
-    if category in {"motivation", "career", "compensation", "logistics", "role_fit"} or any(
-        value in text for value in ("离职", "职业规划", "薪资", "新机会", "岗位如何理解", "岗位的意愿", "愿意去杭州", "迁往杭州", "为什么考虑目标公司", "符合预期")
+    if category == "career" or any(
+        value in text for value in ("离职", "求职", "职业规划", "薪资", "薪酬", "入职", "工作地点")
     ):
         return "career"
-    if category in {"collaboration", "leadership", "organization"} or any(
-        value in text for value in ("团队如何组织", "团队分工", "职责边界", "不配合", "说服", "意见不一致", "推进里程碑")
+    if category == "behavioral" or any(
+        value in text for value in ("团队", "协作", "沟通", "冲突", "领导力")
     ):
         return "collaboration"
-    if category == "product" or any(value in text for value in ("推广", "接入最大痛点", "业务信任", "方案目前怎样共存")):
+    if category == "product" or any(value in text for value in ("产品", "用户", "推广", "业务接入")):
         return "product"
-    if any(value in text for value in ("JVM", "GC", "CMS", "G1", "Java 线程", "HikariCP", "Druid", "DBCP", "垃圾回收")):
+    if any(value in text for value in ("JVM", "GC", "CMS", "G1", "Java", "HikariCP", "Druid", "DBCP", "垃圾回收", "JDK", "HashMap", "ConcurrentHashMap", "线程池", "volatile", "synchronized", "类加载")):
         return "java"
-    if any(value in text for value in ("监控", "告警", "排障", "故障处理", "定位和解决", "定位、止损", "磁盘一键清理", "核心指标", "业务不当使用")):
+    if any(value in text for value in ("监控", "告警", "排障", "故障", "可观测性")):
         return "observability"
-    if category == "data-migration" or any(value in text for value in ("数据迁移", "迁移流程", "新旧库", "双写", "最终一致", "配置中心")):
+    if any(value in text for value in ("数据迁移", "双写", "最终一致", "配置中心")):
         return "migration"
-    if category in {"performance"} or any(value in text for value in ("性能提升", "性能优化", "SQL 改写性能", "SQL 突然变慢", "慢 SQL", "执行计划", "IO 次数", "减少了什么成本", "重复计算", "大事务")):
+    if any(value in text for value in ("性能", "慢 SQL", "执行计划", "IO", "大事务")):
         return "performance"
-    if any(value in text for value in ("高可用", "容灾", "切流", "故障判定", "主库故障", "选主", "限流、降级和熔断", "数据丢失", "恢复时间", "读从读不到", "半同步", "单元化", "调整路由权重")):
+    if any(value in text for value in ("高可用", "容灾", "切流", "选主", "限流", "降级", "熔断", "数据丢失", "半同步", "单元化")):
         return "availability"
-    if any(value in text for value in ("分库分表", "分库/分表", "分片", "跨节点查询", "跨分片", "Group By", "Limit", "Distinct", "路由算法", "哈希扩容")):
+    if any(value in text for value in ("分库分表", "分库/分表", "分片", "Group By", "Limit", "Distinct", "路由算法", "哈希扩容")):
         return "sharding"
-    if any(value in text for value in ("Vitess", "ShardingSphere", "数据库中间件", "数据库代理层", "分布式数据库", "数据库网关", "VTTablet", "Gen4 Planner", "SQL 解析层", "语法树", "影子压测")):
+    if any(value in text for value in ("Vitess", "ShardingSphere", "数据库中间件", "数据库代理", "分布式数据库", "数据库网关", "VTTablet", "SQL 解析", "语法树")):
         return "middleware"
-    if category == "database" or any(value in text for value in ("MySQL", "InnoDB", "锁等待", "意向锁", "Gap Lock", "唯一索引", "主从延迟", "主从、主库")):
+    if any(value in text for value in ("MySQL", "InnoDB", "锁等待", "意向锁", "Gap Lock", "唯一索引", "主从延迟")):
         return "mysql"
-    if category in {"system_design", "design", "architecture"}:
+    if category == "system_design":
         return "system-design"
-    if "关键技术工作" in text:
-        return "project-role"
-    if category in {"project", "experience", "problem_solving", "background", "behavioral"}:
+    if category == "project":
         return "project-role"
     return "other"
 
@@ -145,6 +149,26 @@ def read_text(path: Path) -> str:
         return path.read_text(encoding="utf-8")
     except OSError:
         return ""
+
+
+def reference_source_notice(manifest: dict[str, Any]) -> str:
+    """Show newly registered references without presenting them as verified evidence."""
+    inputs = manifest.get("inputs", {})
+    if not isinstance(inputs, dict):
+        return ""
+    references = inputs.get("reference_transcripts")
+    if not isinstance(references, list) or not references:
+        return ""
+    latest = references[-1]
+    if not isinstance(latest, dict):
+        return ""
+    label_text = html.escape(str(latest.get("source_label") or "参考材料"))
+    use_text = html.escape(str(latest.get("use") or "仅作交叉核对"))
+    return (
+        '<div class="notice"><strong>补充材料已登记</strong>'
+        f'<p>共 {len(references)} 份；最新：{label_text}。{use_text}。'
+        '登记不会自动重算本场分析；下方完整复盘保留生成时的材料状态。</p></div>'
+    )
 
 
 def question_tag_map(root: Path) -> dict[tuple[str, str], dict[str, Any]]:
@@ -895,6 +919,46 @@ def practice_items(case_path: Path) -> list[dict[str, Any]]:
             "rank": (0 if technical else 1, float(total) if isinstance(total, (int, float)) else 99, index),
         })
     return sorted(items, key=lambda item: item["rank"])
+
+
+def practice_attempt_history(case_path: Path, question_id: str, limit: int = 3) -> str:
+    """只读展示本题最近练习；正文来自私有路径并经过 HTML 转义。"""
+    root = case_path.parents[1]
+    qa = read_json(case_path / "qa-tree.json", {})
+    case_id = str(qa.get("case_id") or "")
+    log = root / "practice" / "attempts.jsonl"
+    if not case_id or not log.is_file():
+        return '<div class="practice-history" data-practice-history><p class="muted">暂无已保存练习记录。</p></div>'
+    rows: list[dict[str, Any]] = []
+    malformed = False
+    for line in log.read_text(encoding="utf-8").splitlines():
+        try:
+            item = json.loads(line)
+        except ValueError:
+            malformed = True
+            continue
+        if isinstance(item, dict) and item.get("case_id") == case_id and item.get("question_id") == question_id:
+            rows.append(item)
+    cards: list[str] = []
+    for item in rows[-limit:][::-1]:
+        answer_path = root / str(item.get("answer_path") or "")
+        try:
+            private_root = (root / "practice" / "private").resolve()
+            if private_root not in answer_path.resolve().parents:
+                raise ValueError("练习正文路径越界")
+            answer = answer_path.read_text(encoding="utf-8").strip()
+        except (OSError, ValueError):
+            answer = "练习正文暂时不可读，请检查本机档案。"
+        cards.append(
+            '<article class="practice-history-card">'
+            f'<p class="practice-history-meta"><strong>{html.escape(str(item.get("recorded_at") or "未知时间"))}</strong>'
+            f' · 自评 {html.escape(str(item.get("self_rating") or "未记录"))} · 待审核</p>'
+            f'<p>{html.escape(answer)}</p></article>'
+        )
+    warning = '<p class="notice">练习记录索引需检查，部分记录未能读取。</p>' if malformed else ""
+    return '<div class="practice-history" data-practice-history><h5>最近练习记录</h5>' + warning + (
+        "".join(cards) if cards else '<p class="muted">暂无已保存练习记录。</p>'
+    ) + '</div>'
 
 
 def case_answer_map(case_path: Path) -> dict[str, dict[str, Any]]:
@@ -1855,6 +1919,7 @@ def question_card(case: dict[str, Any], entry: dict[str, Any], segments: dict[st
         "复制内容含本题及相关场次的现场回答摘录、已有参考答案和你的补充；发送前可先核对。"
     )
     if not from_case:
+        practice_history = practice_attempt_history(case["path"], qid)
         practice_widget = (
             f'<div class="answer-workbench" data-practice-widget data-draft-key="supplement:{html.escape(str(case["case_id"]), quote=True)}:{html.escape(qid, quote=True)}" data-case-id="{html.escape(str(case["case_id"]), quote=True)}" '
             f'data-home-group-id="{html.escape(home_group_id, quote=True)}" '
@@ -1886,7 +1951,7 @@ def question_card(case: dict[str, Any], entry: dict[str, Any], segments: dict[st
             '</select></label><label>备注（可选）<input data-practice-note type="text" placeholder="例如：缺少指标或失败边界"></label>'
             '<button type="button" data-practice-save>保存本次练习</button>'
             '<p class="practice-save-note">优先直接保存到本机私有档案，状态会标为“已入库 · 待审核”。服务暂时不可用时，才下载“待应用”文件。</p>'
-            '<span data-practice-result></span></details></div>'
+            '<span data-practice-result></span></details>' + practice_history + '</div>'
         )
     if home_focus:
         source_label = f'{html.escape(str(case["company"]))} · {html.escape(str(case["round"]))}'
@@ -2418,7 +2483,7 @@ STYLE = """
 .merge-membership{margin:4px 0 0 28px;color:#31577d;font-size:12px;font-weight:700}.merge-membership a{font-weight:700}
 .question-tags{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}.question-tags .tag{background:#f1f5f9;color:#475569;font-size:11px}.preference-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:10px 0;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px}.preference-actions button{border:1px solid #cbd5e1;border-radius:7px;padding:5px 8px;background:#fff;color:#334155;font:inherit;font-size:12px;cursor:pointer}.preference-actions button[data-preference-choice="low_priority"]{color:#9a3412}.preference-actions button[data-preference-choice="ignored"]{color:#b91c1c}.preference-actions button[aria-pressed="true"]{box-shadow:0 0 0 2px #bfdbfe;background:#eff6ff;font-weight:700}.preference-label{font-size:12px;font-weight:700;color:#475569}.preference-actions [data-preference-result]{font-size:12px;color:var(--muted)}.long-tail-section{margin-top:16px}.long-tail-section>summary{font-size:18px}.cluster-card .preference-actions{margin-top:0}.cluster-action-bar{display:flex;align-items:flex-start;gap:10px;flex-wrap:nowrap;overflow-x:auto;margin-top:12px;padding:10px 0 2px;border-top:1px solid var(--line)}.cluster-action-bar>.review-actions{display:grid;grid-template-columns:repeat(4,max-content);align-items:center;gap:8px;flex:0 0 auto;margin:0}.cluster-action-bar>.preference-actions{flex:0 0 auto;margin:0}.cluster-action-bar>.review-actions [data-review-result]{grid-column:1/-1;min-width:0;flex-basis:auto;white-space:normal}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.merge-builder{margin:16px 0;padding:16px 18px;background:#fff;border:1px solid var(--line);border-radius:14px}.merge-builder>summary{cursor:pointer;font-weight:800;color:#1f4770}.merge-builder>label,.merge-form-grid label{display:block;margin-top:10px}.merge-builder input[type="search"],.merge-builder input[type="text"],.merge-builder select,.merge-builder textarea{width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:7px;font:inherit}.merge-selection-summary{display:flex;gap:12px;flex-wrap:wrap;margin:10px 0;color:var(--muted);font-size:12px}.merge-options{max-height:360px;overflow:auto;border:1px solid var(--line);border-radius:9px;padding:6px;margin-top:8px}.merge-option{padding:8px 6px;border-bottom:1px solid #edf1f5}.merge-option:last-child{border-bottom:0}.merge-option[hidden]{display:none}.merge-option label{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:8px;align-items:start;cursor:pointer}.merge-option small{grid-column:2;color:var(--muted);font-size:11px;margin-top:3px}.merge-question-text{line-height:1.45}.merge-form-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(180px,1fr);gap:10px}.merge-builder button[data-merge-queue]{margin-top:12px;border:0;border-radius:8px;padding:8px 11px;background:var(--blue);color:#fff;font:inherit;font-weight:700;cursor:pointer}.merge-builder button.secondary{background:#64748b}.merge-builder [data-merge-result]{margin-left:8px;color:var(--muted);font-size:12px}
 :root{--ink:#172033;--muted:#64748b;--paper:#f5f7fb;--card:#fff;--line:#dfe5ef;--blue:#2557d6;--cyan:#0e7490;--green:#087f5b;--amber:#b45309;--red:#c2413a}
-*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}main{width:min(1180px,calc(100% - 28px));margin:auto;padding:24px 0 64px}.topnav{display:flex;gap:16px;align-items:center;margin:0 0 14px;font-size:13px}.hero{padding:30px;border-radius:22px;background:linear-gradient(135deg,#172554,#1d4ed8 58%,#0e7490);color:#fff;box-shadow:0 18px 42px #1e3a8a29}.hero h1{font-size:clamp(27px,5vw,44px);line-height:1.15;margin:6px 0}.eyebrow{text-transform:uppercase;letter-spacing:.12em;font-size:12px;opacity:.76}.meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:17px}.badge{border:1px solid #ffffff42;background:#ffffff17;border-radius:999px;padding:4px 10px;font-size:13px}.notice{margin-top:16px;padding:13px 15px;border-left:4px solid var(--amber);background:#fff8e8;color:#70420a;border-radius:8px}section{margin-top:28px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px;box-shadow:0 3px 12px #0f172a08}.grid{display:grid;gap:14px}.scores{grid-template-columns:repeat(4,minmax(0,1fr))}.label{color:var(--muted);font-size:12px}.metric{font-size:30px;font-weight:760}.metric span{font-size:13px;color:var(--muted)}.track{height:8px;background:#e6ebf3;border-radius:99px;overflow:hidden}.track i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--blue))}h2{font-size:22px;margin:0 0 12px}h3{font-size:18px;margin:22px 0 8px}h4{font-size:16px;margin:18px 0 7px}blockquote{margin:12px 0;padding:10px 14px;border-left:4px solid #93c5fd;background:#eff6ff;color:#1e3a8a;border-radius:7px}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#eef2f7;border-radius:5px;padding:1px 5px}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:#fff}table{width:100%;border-collapse:collapse;min-width:760px}th,td{text-align:left;vertical-align:top;padding:11px;border-bottom:1px solid var(--line)}th{background:#eef2f7;color:#334155;font-size:13px}.status,.tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;background:#e8eefc;color:#1d4ed8}.status.strong,.status.correct{background:#d1fae5;color:#047857}.status.medium,.status.partial{background:#e0f2fe;color:#0369a1}.status.weak,.status.incorrect{background:#ffedd5;color:#c2410c}.status.unverified{background:#e2e8f0;color:#475569}details{background:#fff;border:1px solid var(--line);border-radius:10px;padding:0 14px;margin:9px 0}summary{cursor:pointer;padding:12px 0;font-weight:650}.segment{padding:11px 0;border-bottom:1px solid var(--line);scroll-margin-top:10px}.segment p{margin:5px 0}.review{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px}.review h2:first-child{margin-top:0}.search{width:100%;max-width:520px;padding:11px 13px;border:1px solid #cbd5e1;border-radius:10px;margin:0 0 12px;font:inherit}.current{background:#eff6ff}.muted{color:var(--muted)}.foot{margin-top:24px;color:var(--muted);font-size:13px}.empty{display:none;padding:12px;color:var(--muted)}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}main{width:min(1180px,calc(100% - 28px));margin:auto;padding:24px 0 64px}.topnav{display:flex;gap:16px;align-items:center;margin:0 0 14px;font-size:13px}.hero{padding:30px;border-radius:22px;background:linear-gradient(135deg,#172554,#1d4ed8 58%,#0e7490);color:#fff;box-shadow:0 18px 42px #1e3a8a29}.hero h1{font-size:clamp(27px,5vw,44px);line-height:1.15;margin:6px 0}.eyebrow{text-transform:uppercase;letter-spacing:.12em;font-size:12px;opacity:.76}.meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:17px}.badge{border:1px solid #ffffff42;background:#ffffff17;border-radius:999px;padding:4px 10px;font-size:13px}.notice{margin-top:16px;padding:13px 15px;border-left:4px solid var(--amber);background:#fff8e8;color:#70420a;border-radius:8px}section{margin-top:28px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:17px;box-shadow:0 3px 12px #0f172a08}.grid{display:grid;gap:14px}.scores{grid-template-columns:repeat(4,minmax(0,1fr))}.label{color:var(--muted);font-size:12px}.metric{font-size:30px;font-weight:760}.metric span{font-size:13px;color:var(--muted)}.track{height:8px;background:#e6ebf3;border-radius:99px;overflow:hidden}.track i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--blue))}h2{font-size:22px;margin:0 0 12px}h3{font-size:18px;margin:22px 0 8px}h4{font-size:16px;margin:18px 0 7px}blockquote{margin:12px 0;padding:10px 14px;border-left:4px solid #93c5fd;background:#eff6ff;color:#1e3a8a;border-radius:7px}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#eef2f7;border-radius:5px;padding:1px 5px}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:#fff}table{width:100%;border-collapse:collapse;min-width:760px}th,td{text-align:left;vertical-align:top;padding:11px;border-bottom:1px solid var(--line)}th{background:#eef2f7;color:#334155;font-size:13px}.status,.tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;background:#e8eefc;color:#1d4ed8}.status.strong,.status.correct{background:#d1fae5;color:#047857}.status.medium,.status.partial{background:#e0f2fe;color:#0369a1}.status.weak,.status.incorrect{background:#ffedd5;color:#c2410c}.status.unverified{background:#e2e8f0;color:#475569}.status.personal{background:#ede9fe;color:#5b21b6}details{background:#fff;border:1px solid var(--line);border-radius:10px;padding:0 14px;margin:9px 0}summary{cursor:pointer;padding:12px 0;font-weight:650}.segment{padding:11px 0;border-bottom:1px solid var(--line);scroll-margin-top:10px}.segment p{margin:5px 0}.review{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px}.review h2:first-child{margin-top:0}.search{width:100%;max-width:520px;padding:11px 13px;border:1px solid #cbd5e1;border-radius:10px;margin:0 0 12px;font:inherit}.current{background:#eff6ff}.muted{color:var(--muted)}.foot{margin-top:24px;color:var(--muted);font-size:13px}.empty{display:none;padding:12px;color:var(--muted)}
 .jd-text{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:inherit}
 .topnav{position:sticky;top:0;z-index:5;padding:10px 12px;background:#f5f7fbf2;border:1px solid var(--line);border-radius:10px;backdrop-filter:blur(8px);flex-wrap:wrap}
 section{scroll-margin-top:72px}
@@ -3797,6 +3862,18 @@ def render_profile_event_rows(events: list[dict[str, Any]], cases: list[dict[str
     return "".join(rows)
 
 
+def render_mistake_book_entry(root: Path) -> str:
+    payload = read_json(root / "profile" / "mistake-book.json", {})
+    entries = payload.get("entries") if isinstance(payload.get("entries"), list) else []
+    if not entries:
+        return ""
+    return (
+        '<section class="review-entry"><div><h2>错题本</h2>'
+        f'<p>{len(entries)} 条现场说错的技术结论，按知识主题整理成复习卡，带对照来源。</p></div>'
+        f'<a href="{MISTAKE_BOOK_HTML}">去复习 →</a></section>'
+    )
+
+
 def render_pending_review_entry(root: Path) -> str:
     return (
         '<section class="review-entry"><div><h2>需要纠错时再核对资料</h2>'
@@ -3933,6 +4010,7 @@ def render_case(case: dict[str, Any], cases: list[dict[str, Any]]) -> str:
 <p>{html.escape(case['datetime'])}</p><div class="meta">{meta}</div></div><aside class="case-hero-result"><span>本场结果</span><strong>{html.escape(display_result(str(case['result'])))}</strong><small>{html.escape(str(case['date']))} · {html.escape(str(case['round']))}</small></aside></header>
 {privacy_notice()}
 {warning_block}
+{reference_source_notice(manifest)}
 {review_focus(review)}
 <section id="performance" class="case-section performance-section"><div class="section-heading"><div><span class="section-kicker">快速概览</span><h2>表现概览</h2></div><span class="section-note">只看本场，不做跨岗位排名</span></div><div class="grid scores">{score_cards(scores.get('overall', {}))}</div></section>
 {render_case_practice(case)}
@@ -3960,6 +4038,7 @@ def render_history_index(root: Path, cases: list[dict[str, Any]]) -> str:
 <div id="overview">
 {target_prep}
 {render_history_practice(root, cases)}
+{render_mistake_book_entry(root)}
 {render_pending_review_entry(root)}
 <details id="history-archive" class="history-archive"><summary>查看全部 {len(cases)} 场历史档案与搜索</summary>{render_history_section(cases, None, False)}</details>
 </div>
@@ -4042,6 +4121,236 @@ def render_answers(root: Path, cases: list[dict[str, Any]]) -> str:
 <p class="answer-hub-empty" data-answer-empty>没有匹配的答案。</p>
 <p class="foot">参考答案与现场回答分开保存。未核对草稿可用于练习，涉及个人职责和数字时仍需核对事实。</p>
 </main><script>{SCRIPT}</script></body></html>"""
+
+
+def mistake_book_source_digest(root: Path, cases: list[dict[str, Any]]) -> str:
+    """标识错题本依赖的原始文件；条数相同的内容修订也会改变摘要。"""
+    paths = [root / "profile" / "mistake-book-notes.json"]
+    for case in sorted(cases, key=lambda item: str(item["case_id"])):
+        paths.extend(case["path"] / name for name in ("manifest.json", "qa-tree.json", "claims.json"))
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(str(path.relative_to(root)).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes() if path.is_file() else b"<missing>")
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def render_mistake_book(root: Path, cases: list[dict[str, Any]]) -> str:
+    payload = read_json(root / "profile" / "mistake-book.json", {})
+    entries = payload.get("entries") if isinstance(payload.get("entries"), list) else []
+    entries = [item for item in entries if isinstance(item, dict)]
+    # 错题本是派生视图；claims 变化后若没重跑构建器，这里必须显式提示，避免页面看起来是最新的。
+    live_incorrect = 0
+    for case in cases:
+        claims = read_json(case["path"] / "claims.json", {})
+        live_incorrect += sum(
+            1 for item in claims.get("claims", [])
+            if isinstance(item, dict) and str(item.get("verdict") or "") == "incorrect"
+        )
+    stale_notice = ""
+    if payload and payload.get("source_digest") != mistake_book_source_digest(root, cases):
+        stale_notice = (
+            '<div class="notice">错题本与当前来源文件不一致'
+            f'（页面 {len(entries)} 条，当前判错 {live_incorrect} 条）。'
+            '请运行 <code>python3 scripts/build_mistake_book.py --root &lt;data-root&gt;</code> 后重新渲染。</div>'
+        )
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for item in entries:
+        grouped.setdefault(str(item.get("topic_label") or "其他问题"), []).append(item)
+
+    def source_list(item: dict[str, Any]) -> str:
+        rows: list[str] = []
+        for source in item.get("sources", []):
+            if not isinstance(source, dict):
+                continue
+            url = safe_url(str(source.get("url") or ""))
+            title = str(source.get("title") or "来源")
+            head = external_link(url, title) if url else html.escape(title)
+            section = str(source.get("section") or "").strip()
+            relation = str(source.get("relation") or "").strip()
+            meta = " · ".join(part for part in (section, relation) if part)
+            summary = str(source.get("summary") or "").strip()
+            meta_html = f'<span class="muted"> · {html.escape(meta)}</span>' if meta else ""
+            summary_html = f'<p>{html.escape(summary)}</p>' if summary else ""
+            rows.append(f'<li>{head}{meta_html}{summary_html}</li>')
+        if not rows:
+            return '<p class="muted">该结论没有登记外部来源。</p>'
+        return f'<ul class="mistake-source-list">{"".join(rows)}</ul>'
+
+    def card(item: dict[str, Any]) -> str:
+        entry_id = str(item.get("entry_id") or "")
+        meta = " · ".join(
+            part for part in (
+                str(item.get("date") or ""),
+                str(item.get("company") or ""),
+                str(item.get("role") or ""),
+                str(item.get("round") or ""),
+            ) if part
+        )
+        href = str(item.get("case_href") or "")
+        question = html.escape(str(item.get("question") or "（未记录原题）"))
+        title = f'<a href="{html.escape(href, quote=True)}">{question}</a>' if href else question
+        correction = str(item.get("correction") or "").strip()
+        hook = str(item.get("memory_hook") or "").strip()
+        recall = str(item.get("recall_prompt") or "").strip()
+        version = str(item.get("version_context") or "").strip()
+        searchable = " ".join(
+            str(item.get(field) or "") for field in
+            ("question", "claim", "correction", "why_wrong", "memory_hook", "company", "role", "topic_label")
+        ).lower()
+        version_html = f'<p class="mistake-meta">版本上下文：{html.escape(version)}</p>' if version else ""
+        return (
+            f'<article class="mistake-card" data-mistake-entry="{html.escape(entry_id, quote=True)}"'
+            f' data-search="{html.escape(searchable, quote=True)}">'
+            '<div class="mistake-head"><div>'
+            f'<h3>{title}</h3><p class="mistake-meta">{html.escape(meta)}</p>'
+            f'{version_html}'
+            '</div><span class="status incorrect">错误</span></div>'
+            f'<blockquote class="mistake-claim"><strong>我的说法：</strong>{html.escape(str(item.get("claim") or ""))}</blockquote>'
+            f'<p class="mistake-why"><strong>错在哪：</strong>{html.escape(str(item.get("why_wrong") or ""))}</p>'
+            + (f'<div class="mistake-fix"><strong>正确说法</strong><p>{html.escape(correction)}</p></div>' if correction
+               else '<p class="mistake-why muted"><strong>正确说法：</strong>尚未整理，先按下方来源自行核对。</p>')
+            + (f'<p class="mistake-hook"><strong>记忆点：</strong>{html.escape(hook)}</p>' if hook else "")
+            + (f'<p class="mistake-recall"><strong>复述提示：</strong>{html.escape(recall)}</p>' if recall else "")
+            + f'<details class="mistake-sources"><summary>依据来源（{len(item.get("sources") or [])}）</summary>{source_list(item)}</details>'
+            '<label class="mistake-done"><input type="checkbox" data-mistake-done> 已复习</label>'
+            '</article>'
+        )
+
+    sections: list[str] = []
+    for topic_label, items in grouped.items():
+        sections.append(
+            f'<section class="mistake-topic"><div class="topic-heading">'
+            f'<h2>{html.escape(topic_label)}</h2>'
+            f'<span class="topic-frequency">{len(items)} 条</span></div>'
+            + "".join(card(item) for item in items)
+            + '</section>'
+        )
+    total = len(entries)
+    corrected = sum(1 for item in entries if str(item.get("correction") or "").strip())
+    case_count = len({str(item.get("case_id") or "") for item in entries})
+    body = "".join(sections) if sections else (
+        '<section class="mistake-topic"><h2>暂无错题</h2>'
+        + ('<p class="muted">各场 claims.json 里还没有 verdict=incorrect 的结论。</p>' if not live_incorrect
+           else '<p class="muted">档案里已有判错的结论，但错题本尚未生成；请先运行构建器。</p>')
+        + '</section>'
+    )
+    return f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+{SECURITY_META}<title>错题本</title><style>{STYLE}{MISTAKE_STYLE}</style></head><body data-interview-mistakes data-store-id="{archive_id(root)}"><main>
+<nav class="topnav" aria-label="本页导航"><a href="{HISTORY_HTML}">面试总览</a><a href="{QUESTION_BANK_HTML}">完整题库</a><a href="{ANSWERS_HTML}">已生成答案</a></nav>
+<header class="hero"><div class="eyebrow">Interview System · Mistake Book</div><h1>错题本</h1>
+<p>{total} 条现场判错的结论，按知识主题分组。每条都带「我的说法」和对照来源，复习时先自己复述再展开。</p></header>
+{privacy_notice(compact=True)}
+{stale_notice}
+<section class="mistake-summary">
+<div><span class="label">错题</span><span class="metric">{total}<span> 条</span></span></div>
+<div><span class="label">已整理正确说法</span><span class="metric">{corrected}<span> 条</span></span></div>
+<div><span class="label">涉及场次</span><span class="metric">{case_count}<span> 场</span></span></div>
+<div><span class="label">本机已复习</span><span class="metric" data-mistake-progress>0<span> / {total}</span></span></div>
+</section>
+<div class="mistake-toolbar">
+<input id="mistake-search" class="search" data-mistake-search type="search" placeholder="搜索题目、说法、正确说法或公司">
+<button type="button" class="search-clear" data-mistake-clear hidden>清除搜索</button>
+<label class="mistake-filter"><input type="checkbox" data-mistake-pending> 只看未复习</label>
+<span data-mistake-count aria-live="polite"></span>
+</div>
+{body}
+<p class="mistake-empty" data-mistake-empty hidden>没有匹配的错题。</p>
+<p class="foot">错题本只是派生视图：判定与来源来自各场 claims.json，正确说法来自 profile/mistake-book-notes.json。改判定请回到对应场次；「已复习」只保存在本机浏览器。</p>
+</main><script>{SCRIPT}</script><script>{MISTAKE_SCRIPT}</script></body></html>"""
+
+
+MISTAKE_STYLE = """
+.mistake-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:18px}
+.mistake-summary>div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:2px}
+.mistake-summary .metric{font-size:26px}
+.mistake-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:20px}
+.mistake-toolbar .search{margin:0}
+.mistake-filter{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+.mistake-topic{margin-top:26px}
+.mistake-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin:12px 0;box-shadow:0 3px 12px #0f172a08}
+.mistake-card[hidden]{display:none}
+.mistake-card.done{opacity:.62}
+.mistake-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.mistake-head h3{margin:0 0 4px;font-size:17px}
+.mistake-meta{margin:0;color:var(--muted);font-size:12px}
+.mistake-claim{margin:12px 0 10px;padding:10px 14px;border-left:4px solid #f0b4a8;background:#fff4f1;color:#7c2d12;border-radius:7px}
+.mistake-why{margin:8px 0}
+.mistake-fix{margin:10px 0;padding:12px 14px;border-left:4px solid #6ee7b7;background:#ecfdf5;border-radius:8px}
+.mistake-fix strong{display:block;color:#047857;margin-bottom:4px}
+.mistake-fix p{margin:0}
+.mistake-hook{margin:10px 0 0;padding:8px 12px;background:#eef2ff;border-radius:8px;color:#3730a3}
+.mistake-recall{margin:6px 0 0;color:#475569;font-size:13px}
+.mistake-sources{margin-top:12px}
+.mistake-sources summary{font-size:13px;color:#31577d}
+.mistake-source-list{margin:6px 0 0;padding-left:18px;font-size:13px}
+.mistake-source-list p{margin:2px 0 8px;color:var(--muted)}
+.mistake-done{display:inline-flex;align-items:center;gap:6px;margin-top:12px;font-size:13px;color:var(--muted);cursor:pointer}
+.mistake-empty{padding:16px;color:var(--muted)}
+@media print{.mistake-toolbar,.mistake-done{display:none!important}}
+@media (max-width:760px){.mistake-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+"""
+
+MISTAKE_SCRIPT = """
+(function(){
+  const cards=[...document.querySelectorAll('[data-mistake-entry]')];
+  const KEY='interview-system:mistake-done:v1';
+  const search=document.querySelector('[data-mistake-search]');
+  const clear=document.querySelector('[data-mistake-clear]');
+  const pending=document.querySelector('[data-mistake-pending]');
+  const progress=document.querySelector('[data-mistake-progress]');
+  const count=document.querySelector('[data-mistake-count]');
+  const empty=document.querySelector('[data-mistake-empty]');
+  let done={};
+  try{const raw=JSON.parse(localStorage.getItem(KEY)||'{}');if(raw&&typeof raw==='object')done=raw;}catch(error){done={};}
+  const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(done));}catch(error){/* 隐私模式下忽略 */}};
+  const refresh=()=>{
+    let reviewed=0;
+    for(const card of cards){
+      const id=card.dataset.mistakeEntry||'';
+      const box=card.querySelector('[data-mistake-done]');
+      const isDone=Boolean(done[id]);
+      if(box)box.checked=isDone;
+      card.classList.toggle('done',isDone);
+      if(isDone)reviewed+=1;
+    }
+    if(progress)progress.innerHTML=reviewed+'<span> / '+cards.length+'</span>';
+    return reviewed;
+  };
+  const apply=()=>{
+    const term=(search&&search.value||'').trim().toLowerCase();
+    const onlyPending=Boolean(pending&&pending.checked);
+    let shown=0;
+    for(const card of cards){
+      const id=card.dataset.mistakeEntry||'';
+      const matches=!term||(card.dataset.search||'').includes(term);
+      const visible=matches&&(!onlyPending||!done[id]);
+      card.hidden=!visible;
+      if(visible)shown+=1;
+    }
+    if(count)count.textContent=shown+' 条';
+    if(empty)empty.hidden=shown>0;
+    if(clear)clear.hidden=!term;
+  };
+  cards.forEach(card=>{
+    const box=card.querySelector('[data-mistake-done]');
+    if(!box)return;
+    box.addEventListener('change',()=>{
+      const id=card.dataset.mistakeEntry||'';
+      if(box.checked)done[id]=new Date().toISOString().slice(0,10);else delete done[id];
+      save();refresh();apply();
+    });
+  });
+  if(search)search.addEventListener('input',apply);
+  if(pending)pending.addEventListener('change',apply);
+  if(clear)clear.addEventListener('click',()=>{if(search)search.value='';apply();if(search)search.focus();});
+  refresh();apply();
+})();
+"""
 
 
 def render_pending_review(root: Path, cases: list[dict[str, Any]]) -> str:
@@ -4169,7 +4478,7 @@ def render_question_bank(root: Path, cases: list[dict[str, Any]]) -> str:
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 {SECURITY_META}<title>完整面试题库</title><style>{STYLE}</style></head><body data-interview-question-bank data-store-id="{archive_id(root)}"><main>
-<nav class="topnav" aria-label="本页导航"><a href="{HISTORY_HTML}">面试总览</a><a href="{ANSWERS_HTML}">已生成答案</a><a href="{PENDING_REVIEW_HTML}">按需核对</a></nav>
+<nav class="topnav" aria-label="本页导航"><a href="{HISTORY_HTML}">面试总览</a><a href="{MISTAKE_BOOK_HTML}">错题本</a><a href="{ANSWERS_HTML}">已生成答案</a><a href="{PENDING_REVIEW_HTML}">按需核对</a></nav>
 <header class="hero"><div class="eyebrow">Interview System · Full Question Bank</div><h1>完整面试题库</h1>
 <p>全量题目、跨场高频问法和练习记录集中在此页；总览页只保留一道入口练习，避免首次打开加载全部内容。</p></header>
 {privacy_notice(compact=True)}
@@ -4257,6 +4566,7 @@ def main() -> int:
                     "question_bank": str(root / QUESTION_BANK_HTML),
                     "answers": str(root / ANSWERS_HTML),
                     "pending_review": str(root / PENDING_REVIEW_HTML),
+                    "mistakes": str(root / MISTAKE_BOOK_HTML),
                     "preparations": str(root / PREPARATIONS_HTML),
                     "history_cases": len(cases),
                     "errors": errors,
@@ -4290,6 +4600,9 @@ def main() -> int:
     pending_review = render_pending_review(root, cases)
     errors.extend(smoke_check(pending_review, ["data-interview-pending-review", 'id="review-center"', "下载选择"]))
     pending_review_path = root / PENDING_REVIEW_HTML
+    mistake_book = render_mistake_book(root, cases)
+    errors.extend(smoke_check(mistake_book, ["data-interview-mistakes", "错题本", 'data-mistake-search', f'href="{HISTORY_HTML}"']))
+    mistake_book_path = root / MISTAKE_BOOK_HTML
     preparations = render_interview_preparations(root)
     errors.extend(smoke_check(preparations, ["data-interview-preparations", "公司面试准备", f'href="{HISTORY_HTML}"']))
     preparations_path = root / PREPARATIONS_HTML
@@ -4304,6 +4617,7 @@ def main() -> int:
         write_text(question_bank_path, question_bank)
         write_text(answers_path, answers)
         write_text(pending_review_path, pending_review)
+        write_text(mistake_book_path, mistake_book)
         write_text(preparations_path, preparations)
         for preparation_path, preparation in preparation_pages:
             write_text(preparation_path, preparation)
@@ -4318,6 +4632,7 @@ def main() -> int:
                 "question_bank": str(question_bank_path),
                 "answers": str(answers_path),
                 "pending_review": str(pending_review_path),
+                "mistakes": str(mistake_book_path),
                 "preparations": str(preparations_path),
                 "preparation_pages": [str(path) for path, _ in preparation_pages],
                 "history_cases": len(cases),

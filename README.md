@@ -83,6 +83,8 @@ Windows PowerShell 演示（`--root` 须为不存在或空的目录）：
 
 ### 打开面试档案
 
+macOS 可双击 Skill 目录中的 [start-interview-system.command](start-interview-system.command)。首次运行输入已选定的私有档案绝对路径；脚本将路径保存在本机 `~/.config/interview-system/data-root`，不写入 Skill 仓库。更换档案目录时，在终端运行 `./start-interview-system.command --root <data-root>`；可加 `--check` 只检查启动配置。
+
 在终端运行一次，`<data-root>` 必须是你已指定的私有档案绝对路径；浏览器会自动打开当前本机会话入口，查看和保存都从这里进入：
 
 ```bash
@@ -126,7 +128,7 @@ python3 scripts/backup_store.py create --root <data-root> --output <backup.age> 
 python3 scripts/backup_store.py verify --backup <backup.age> --identity <私钥文件>
 python3 scripts/backup_store.py restore --backup <backup.age> --identity <私钥文件> --target <空目录> --confirm-empty-target
 ```
-- 向 GitHub 发布前运行 `python3 scripts/check_public_release.py --strict`。工具分别报告工作区、实际 Git 暂存区和当前本地可见历史的覆盖状态，只输出文件位置、风险类别和行号，不打印命中的密钥或个人文本。检查不代替专用密钥扫描和人工复核；若发现历史泄露，它不会自动改写历史或强制推送。
+- 向 GitHub 发布前运行 `python3 scripts/check_public_release.py --strict`，并按 [贡献指南](CONTRIBUTING.md) 启用本地推送门禁及私有词表。工具分别报告工作区、实际 Git 暂存区和当前本地可见历史，只输出文件位置、风险类别和行号，不打印命中的密钥或个人文本。CI 在推送后复查；发行脚本还会检查最终 ZIP。自动检查无法识别所有私有语义，发布前须人工审阅；若发现历史泄露，工具不会自动改写历史或强制推送。
 
 对私人数据目录做只读自检：
 

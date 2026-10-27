@@ -7,10 +7,16 @@ import re
 import shutil
 import tempfile
 import zipfile
+import contextlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 
 SCHEMA_VERSION = 1
@@ -150,6 +156,117 @@ def append_private_text(path: Path, value: str) -> None:
             data = data[written:]
     finally:
         os.close(descriptor)
+
+
+@contextlib.contextmanager
+def data_root_write_lock(root: Path):
+    """跨 CLI/本机服务的同一数据根写锁；锁文件故意持久存在。"""
+    lock_dir = root / "logs"
+    lock_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = lock_dir / "data-write.lock"
+    descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        os.chmod(path, 0o600)
+        if os.name == "nt":
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            os.write(descriptor, b"0")
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+        else:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            if os.name == "nt":
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+        finally:
+            os.close(descriptor)
+
+
+def recover_write_transactions(root: Path) -> None:
+    """回滚崩溃留下的未完成批量提交；已完成事务只保留审计标记。"""
+    directory = root / "logs" / "write-transactions"
+    if not directory.is_dir():
+        return
+    for journal_path in sorted(directory.glob("*.json")):
+        try:
+            journal = json.loads(journal_path.read_text(encoding="utf-8"))
+            if journal.get("state") == "done":
+                continue
+            for item in reversed(journal.get("files", [])):
+                target = Path(item["target"])
+                backup = Path(item["backup"])
+                if backup.is_file():
+                    os.replace(backup, target)
+                elif item.get("existed") is False:
+                    target.unlink(missing_ok=True)
+            journal_path.unlink(missing_ok=True)
+            shutil.rmtree(journal_path.with_suffix(""), ignore_errors=True)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise RuntimeError(f"未完成写事务无法恢复：{journal_path.name}") from error
+
+
+def commit_write_transaction(
+    root: Path,
+    updates: dict[Path, bytes],
+    transaction_id: str,
+    *,
+    finalize: bool = True,
+    result: dict[str, Any] | None = None,
+) -> None:
+    """以暂存文件+恢复日志提交多个文件；调用方必须已持有 data_root_write_lock。"""
+    directory = root / "logs" / "write-transactions"
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    journal_path = directory / f"{transaction_id}.json"
+    if journal_path.is_file():
+        journal = read_json(journal_path)
+        if journal.get("state") == "done":
+            return
+        recover_write_transactions(root)
+    staging = directory / transaction_id
+    staging.mkdir(mode=0o700, exist_ok=True)
+    files = []
+    for index, (target, data) in enumerate(updates.items()):
+        target = target.resolve()
+        staged = staging / str(index)
+        staged.write_bytes(data)
+        os.chmod(staged, 0o600)
+        backup = staging / f"backup-{index}"
+        existed = target.is_file()
+        if existed:
+            shutil.copyfile(target, backup)
+            os.chmod(backup, 0o600)
+        files.append({"target": str(target), "backup": str(backup), "existed": existed, "staged": str(staged)})
+    journal = {"schema_version": 1, "state": "prepared", "files": files}
+    write_json(journal_path, journal)
+    try:
+        journal["state"] = "committing"
+        write_json(journal_path, journal)
+        for item in files:
+            target = Path(item["target"])
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(item["staged"], target)
+        if finalize:
+            if result is not None:
+                journal["result"] = result
+            journal["state"] = "done"
+            write_json(journal_path, journal)
+            shutil.rmtree(staging, ignore_errors=True)
+    except Exception:
+        recover_write_transactions(root)
+        raise
+
+
+def finalize_write_transaction(root: Path, transaction_id: str, result: dict[str, Any]) -> None:
+    path = root / "logs" / "write-transactions" / f"{transaction_id}.json"
+    journal = read_json(path)
+    journal["result"] = result
+    journal["state"] = "done"
+    write_json(path, journal)
+    shutil.rmtree(path.with_suffix(""), ignore_errors=True)
 
 
 def open_private_text(path: Path):

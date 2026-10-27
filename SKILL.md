@@ -9,6 +9,8 @@ description: 复盘真实面试并维护个人长期面试档案，也支持按�
 
 用户要求快速上手时，由 Agent 按 [README Quickstart](README.md#quickstart交给-agent) 完成安装、环境检查和虚构样例验收；有真实资料或已有档案时，再按下文规则导入或打开本机服务。不要把命令清单当成用户必须手动完成的前置步骤；私有目录和真实资料授权仍须按实际需要确认。GitHub Pages 只展示虚构材料，不能保存到个人档案。
 
+macOS 双击入口为 Skill 根目录的 [start-interview-system.command](start-interview-system.command)；它只从本机私有配置读取已指定的档案路径，首次使用可由用户输入，不在公开源码中保存个人目录。
+
 脚本路径必须从本文件所在的 Skill 目录解析，不能假设当前工作目录包含 `scripts/`。下文的 `<skill-dir>` 和 `<data-root>` 必须替换为实际绝对路径；`<python>` 为可用的 Python 3.10+ 命令。macOS/Linux 可用 `.venv/bin/python` 或 `python3`；Windows PowerShell 可用 `.venv\Scripts\python.exe`、`py -3` 或已安装的 `python`。命令行路径和续行符应按当前系统转换；`init_store.py` 不会自动创建虚拟环境。Windows 已有用户试跑成功反馈，具体环境与覆盖范围未记录；需要录音、扫描件或模型能力时仍须分别实测。
 
 初次使用或更换宿主后，先运行 `<python> <skill-dir>/scripts/doctor.py` 检查本地候选能力；它不读取面试资料，也不能代替模型和 OCR 的实际验收。
@@ -29,14 +31,14 @@ description: 复盘真实面试并维护个人长期面试档案，也支持按�
 - 首页待打磨题目从私有档案实时选取：跳过已有已确认跨场答案或本题答案的问题，优先显示尚未确认的高频答案；保存后重建页面，下次进入应出现下一批题。已确认答案仍可在题库和答案库查看，不把“已确认”当作“已掌握”。
 - 首页答案入口与所展示的答案对应：已保存本题专用答案优先；否则显示已明确关联的跨场答案并允许直接修订确认；没有跨场答案时显示逐题稿或空状态，并允许保存本题答案。逐题稿与跨场答案同时存在时，不能让逐题稿遮住跨场答案的确认入口。
 - 首页跨场题组不突出某一道“代表题”：以题组名称作标题，展开后并列显示每场原题、当时回答及证据链接，单场公司与轮次放在对应原题上。复制给 AI 时带上组内各场摘录。展开控件使用随文字收缩的按钮宽度与垂直居中排版；未归组的单场题仍显示场次标签。
-- 用户从题库页面导出确认、修订或练习操作：运行 `apply_review_actions.py --root <data-root> --actions <导出的JSON>`，再运行 `audit_standard_answers.py --reset-confirmed-stale`、`build_review_plan.py` 和全量 HTML 重建；本机服务页面也可在展示操作摘要并经用户确认后走同一应用器。导出文件或页内操作未通过旧状态和全量引用预校验前不得宣称已经写入；跨文件写入不是事务，磁盘故障时必须提示可能已部分写入并要求核对档案。成熟答案和高频分组的文本修订要在私有修订日志中保留完整的修改前后快照。
+- 用户从题库页面导出确认、修订或练习操作：运行 `apply_review_actions.py --root <data-root> --actions <导出的JSON>`，再运行 `audit_standard_answers.py --reset-confirmed-stale`、`build_review_plan.py` 和全量 HTML 重建；本机服务页面也可在展示操作摘要并经用户确认后走同一应用器。导出文件或页内操作未通过旧状态和全量引用预校验前不得宣称已经写入；审核、练习和目标准备稿三条写路径使用同一数据根的事务日志与跨进程写锁，其他写入路径尚未全局事务化，磁盘故障时仍须核对档案。成熟答案和高频分组的文本修订要在私有修订日志中保留完整的修改前后快照。
 - 用户在同一台电脑上说“应用刚导出的审核结果”或“保存刚下载的练习记录”时，从其下载目录中查找最新的 `interview-review-actions-*.json`，核对修改时间和结构后按上一条流程应用；无需用户再次上传。练习页面优先通过本机服务直接写入私有档案，页面明确显示“已入库 · 待审核”；本机服务不可连接时才下载单条 `practice_attempt` 待应用文件，并明确显示“已下载 · 未入库”。没有匹配文件或同时存在多个无法可靠区分的新文件时停止并说明，不猜测目标。
 - 用户粘贴页面生成的“请基于我的真实回答”请求时，依据其中的 `case_id` 和 `question_id` 定位原题、现场回答及现有证据。优先使用用户当前补充，发现它与历史回答冲突时明确列出；先诊断已覆盖与缺口，再给 30 秒版、2 分钟版及可能追问。个人职责、数字和项目结果只能来自用户证据，技术补充与个人事实分开写；用户未要求保存时不写入档案。
 - 用户在答案打磨后说“保存这题的答案”时，定位当前对话中明确选定的题目与答案版本；不明确时先核对目标，不猜测。优先修订该题已绑定的跨场答案并记录前后版本；没有可靠跨场归并时只保存逐题答案，不擅自把其他场次并入。运行相应校验器并重建 HTML。保存请求本身不等于事实已核对，只有用户明确确认具体版本时才标为 `confirmed`。告知保存结果后可直接切到首页下一道高频题；切题不写入“已掌握”状态。
 - 本机入口只绑定 `127.0.0.1`；从服务进入后，查看与保存使用同一套页面。相同 `<data-root>` 重复启动时，启动器持有跨平台 OS advisory lock，并复用现有服务入口，不再监听新端口；原进程正常退出或崩溃后，锁由操作系统释放，下次启动再建立新会话；不同 `<data-root>` 各自独立。锁文件和包含令牌的就绪状态文件均为本机私有权限，不把裸地址变成已授权入口；浏览器发送的 Cookie 仍不按端口隔离，端口派生 Cookie 名称只用于避免同一浏览器实例互相覆盖，不是安全边界。启动时可用 `--open-browser` 自动打开当前会话网址；令牌随重启更新，不复用旧的 `/open?token=...` 书签。网页预填已有 30 秒版和 2 分钟版，用户编辑后需重新核对个人事实并点击“保存并确认到档案”；只有服务返回成功才算写入。服务校验所见旧版本、记录前后快照并重建 HTML。跨场答案沿用 `apply_review_actions.py`；单场本题答案写入该场 `practice-answers.json` 的 `curated_answer`，不修改现场回答或跨场共用答案。普通 `file://` 页面只是离线副本，不能直接写档案；此入口不运行 AI。
 - 用户要求根据多次回答整理自我介绍、架构介绍等高频题标准答案：读 [references/profile-and-prep.md](references/profile-and-prep.md)、[references/schemas.md](references/schemas.md) 和 [references/html-presentation.md](references/html-presentation.md)。先把语义相同或面试意图相近的问题引用保存到私有 `profile/question-clusters.json`，不能把整个主题频率冒充同一道题的频率；再汇总对应现场回答，消除重复和冲突，把 30 秒版、2 分钟版、常见追问、待补证据和来源引用保存到 `profile/standard-answers.json`。若原条目混合了多个项目或不同面试意图，用 `split_curated_entries.py --root <data-root> --spec <拆分JSON>` 将原条目标记为 `rejected`并建立新的 `pending` 条目；拆分规格必须对原问题引用做无遗漏、无重复的完整分区。技术题另读 [references/fact-checking.md](references/fact-checking.md) 并优先绑定官方资料。运行 `check_question_clusters.py`、`check_standard_answers.py` 后重建全部 HTML。未经用户确认保持 `pending`；只有用户明确确认具体版本时，才运行 `set_standard_answer_status.py` 追加修订并改为 `confirmed`。
 - 新增面试后运行 `refresh_question_clusters.py` 生成未归并题目的候选报告，并逐条检查新增场次的问题，尤其是已有高频题组对应的问法。人工核对确属同一意图后，用 `apply_review_actions.py` 将真实问题引用加入题组并保留修订日志；不要仅因候选分数未达到 `high` 就漏掉明显同类题。只有显式使用 `--apply-high-confidence` 才可自动追加高置信候选，且相关组一律回到 `pending`；相似度只是线索，不能代替语义核对。随后运行 `audit_standard_answers.py --reset-confirmed-stale`，用新增现场回答和数字差异线索修订成熟答案；未审阅的新回答不自动加入已确认参考答案的来源题。校验题组并重建全部 HTML，核对题组场次和题数已更新。
-- 用户要求练习题参考答案：先明确是重点题及延伸追问，还是全部历史题；按 [references/fact-checking.md](references/fact-checking.md) 核验技术结论，给每道要求覆盖的题目单独保存参考答案。写答案前先读本题 `answer_evidence` 对应的现场回答，在 `scope` 里点明已答到的部分和缺口，再给答法；不要把与现场回答无关的通用模板当成“针对我的答案”。技术题的 `sources` 必须写入实际打开核对过的官方来源（标题 + URL），查不到可靠来源时在 `scope` 或 `validation` 里标注待核实，不得用模型记忆补成确定结论。答案不能冒充候选人当场回答或真实项目成果；Java 算法答案要编译并运行边界测试。按 [references/html-presentation.md](references/html-presentation.md) 重建页面，再用 `check_practice_answers.py --root <data-root> --case <case_id|场次目录名|绝对路径>` 校验单场覆盖范围（`--scope focus|all` 用于重点题或全库）；输出中的 `answers_without_sources` 列出缺核验资料的题目，须逐条处理或说明理由。
+- 用户要求练习题参考答案：先明确是重点题及延伸追问，还是全部历史题；按 [references/fact-checking.md](references/fact-checking.md) 核验技术结论，给每道要求覆盖的题目单独保存参考答案。写答案前先读本题 `answer_evidence` 对应的现场回答，在 `scope` 里点明已答到的部分和缺口，再给答法；不要把与现场回答无关的通用模板当成“针对我的答案”。技术题的 `sources` 必须写入实际打开核对过的官方来源（标题 + URL），查不到可靠来源时在 `scope` 或 `validation` 里标注待核实，不得用模型记忆补成确定结论。答案不能冒充候选人当场回答或真实项目成果；30 秒版应可直接口述结论，2 分钟版须比前者增加具体机制、例子、条件或反例以及个人职责边界，不能只写“补充”“举例”“另列证据”等写作提示。运行 `check_practice_answer_depth.py` 检出过短或重复版本，再人工复核。Java 算法答案要编译并运行边界测试。按 [references/html-presentation.md](references/html-presentation.md) 重建页面，再用 `check_practice_answers.py --root <data-root> --case <case_id|场次目录名|绝对路径>` 校验单场覆盖范围（`--scope focus|all` 用于重点题或全库）；输出中的 `answers_without_sources` 列出缺核验资料的题目，须逐条处理或说明理由。
 - 创建或校验 JSON 产物：读 [references/schemas.md](references/schemas.md)，并运行校验脚本。
 - 用户要求将本地录音转写、导入会议智能纪要 ZIP 或用参考文字稿校对：先读 [references/audio-and-html.md](references/audio-and-html.md)，再进入文稿闭环。会议纪要先安全检查 ZIP 并只提取用户指定或唯一的 Markdown；其中 AI 摘要不是事实源。若用户只提供录音但未要求转写，先确认其期望，不擅自处理音频。HTML 无需另行触发，所有路线均默认交付。
 - 用户要求安装、检查或实测本地语音：读 [references/local-audio-setup.md](references/local-audio-setup.md)，用 `audio_setup.py check` 查依赖，再用自有短语音运行 `smoke`；两者结果不得混淆。
@@ -116,14 +118,17 @@ description: 复盘真实面试并维护个人长期面试档案，也支持按�
    <python> <skill-dir>/scripts/record_profile_patch.py --root <data-root> --case <case_path>
    ```
 
-8. 按 [references/html-presentation.md](references/html-presentation.md) 重建全部场次的离线 HTML。结果页须展示本场保存的 JD 原文，随后展示 JD 能力矩阵；未提供 JD 时明确标注。校验当前场：
+8. 先刷新错题本，再按 [references/html-presentation.md](references/html-presentation.md) 重建全部场次的离线 HTML。结果页须展示本场保存的 JD 原文，随后展示 JD 能力矩阵；未提供 JD 时明确标注。校验当前场：
 
    ```bash
+   <python> <skill-dir>/scripts/build_mistake_book.py --root <data-root>
    <python> <skill-dir>/scripts/render_interview_html.py --root <data-root> --all
    <python> <skill-dir>/scripts/validate_case.py --case <case_path> --stage presentation
    ```
 
-9. 对话中只给结论摘要、最高风险和下一步；先启动或复用本机服务，再优先提供服务内的当前场 `interview-review.html` 与根目录 `interview-history.html`，不要混用 `file://` 链接。用户要看全部答案时链接服务内的 `interview-answers.html`，要找原题时链接 `interview-question-bank.html`；需要纠错时再给 `interview-pending-review.html`。
+   错题本只汇总 `verdict=incorrect` 的 claim。「正确说法」「记忆点」「复述提示」来自 `profile/mistake-book-notes.json`，属于人工整理内容，不自动生成；没整理过的条目只展示 claim 自带的说明和来源，不要用模型补写结论。改了 claim 判定就要重跑构建器，否则页面会提示与 claims 不一致。
+
+9. 对话中只给结论摘要、最高风险和下一步；先启动或复用本机服务，再优先提供服务内的当前场 `interview-review.html` 与根目录 `interview-history.html`，不要混用 `file://` 链接。用户要看全部答案时链接服务内的 `interview-answers.html`，要找原题时链接 `interview-question-bank.html`；需要集中复习说错的技术点时给 `interview-mistakes.html`；需要纠错时再给 `interview-pending-review.html`。
 
 准备下一场时，可从最近一场含 JD 矩阵的场次生成确定性简报：
 
@@ -184,7 +189,7 @@ description: 复盘真实面试并维护个人长期面试档案，也支持按�
 
 ## 跨宿主分发
 
-公开发布源码前运行 `<python> <skill-dir>/scripts/check_public_release.py --strict`；它分别扫描工作区、实际 Git 暂存区和当前本地可见历史，但不代替专用密钥扫描与人工复核。真实面试数据目录不得作为源码仓库发布。发布检查器发现缺少许可证时应停止，由维护者选择许可证，不自动代选；发现历史风险时只报告，不自动改写历史。
+公开发布源码前运行 `<python> <skill-dir>/scripts/check_public_release.py --strict`，并启用 `.githooks/pre-push` 推送门禁；已配置私有档案时按 [CONTRIBUTING.md](CONTRIBUTING.md) 维护本机私有词表。检查覆盖工作区、实际 Git 暂存区、当前本地可见历史和最终发行 ZIP，但不能识别所有语义隐私；发布前仍须人工审阅。真实面试数据目录不得作为源码仓库发布。发现缺少许可证时停止，由维护者选择许可证；发现历史风险时只报告，不自动改写历史。
 
 项目只维护一个不针对宿主改写的发行包，不为 Codex、Claude、Trae、WorkBuddy 或其他软件复制入口、脚本和规则：
 

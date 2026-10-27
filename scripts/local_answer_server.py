@@ -458,12 +458,22 @@ class LocalAnswerHandler(BaseHTTPRequestHandler):
                 note=str(data.get("note") or ""),
                 attempt_id=attempt_id or None,
             )
-        return {
+        result = {
             "status": "recorded",
             "attempt_id": event["attempt_id"],
             "review_status": event.get("review_status", "pending"),
             "deduplicated": bool(event.get("deduplicated")),
         }
+        if not result["deduplicated"]:
+            render = subprocess.run(
+                [sys.executable, str(Path(__file__).with_name("render_interview_html.py")),
+                 "--root", str(self.server.root), "--all"],
+                text=True, capture_output=True, check=False,
+            )
+            if render.returncode != 0:
+                result["page_refresh_required"] = True
+                result["warning"] = "练习记录已写入档案，但页面重建失败；请手动重建页面后刷新。"
+        return result
 
     def _apply_relation_action(self, action: dict[str, object]) -> dict[str, object]:
         root = self.server.root

@@ -59,6 +59,7 @@ PDF 输入的逐页提取方法记录在 `manifest.inputs.transcript_pdf_pages` 
 ```
 
 `kind` 为 `main` 或 `follow_up`。追问必须有有效 `parent_id`。
+`category` 使用 `question_taxonomy.py` 的受控取值；历史标签可由 `normalize_question_categories.py` 归并。需要按具体场次和题目人工改判时，用 `--overrides` 指向 Skill 目录外的私有 JSON：`{"schema_version":1,"overrides":[{"case_id":"case-example","question_id":"q-001","category":"career"}]}`。默认只报告，`--apply` 在全部目标场次校验通过后才写入。
 
 ## claims.json
 

@@ -13,13 +13,16 @@ import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
-from check_public_release import audit
+from check_public_release import audit, load_private_markers, scan_text
 
 
 PACKAGE_ROOT = PurePosixPath("interview-system")
 EXCLUDED_NAMES = {"__pycache__", ".DS_Store"}
 PACKAGE_FILES = (
     "SKILL.md",
+    "AGENTS.md",
+    ".githooks/pre-push",
+    "start-interview-system.command",
     "README.md",
     "LICENSE",
     "CONTRIBUTING.md",
@@ -55,6 +58,7 @@ PACKAGE_FILES = (
     "scripts/audit_question_coverage.py",
     "scripts/audit_standard_answers.py",
     "scripts/backup_store.py",
+    "scripts/build_mistake_book.py",
     "scripts/build_next_prep.py",
     "scripts/build_pages_demo.py",
     "scripts/build_release_package.py",
@@ -63,6 +67,7 @@ PACKAGE_FILES = (
     "scripts/check_data_compatibility.py",
     "scripts/check_target_interview_preps.py",
     "scripts/check_practice_answers.py",
+    "scripts/check_practice_answer_depth.py",
     "scripts/check_public_release.py",
     "scripts/check_question_clusters.py",
     "scripts/check_question_preferences.py",
@@ -81,10 +86,12 @@ PACKAGE_FILES = (
     "scripts/local_answer_server.py",
     "scripts/migrate_legacy_audio.py",
     "scripts/migrate_store.py",
+    "scripts/normalize_question_categories.py",
     "scripts/ocr_image.swift",
     "scripts/pdf_ocr.py",
     "scripts/profile_store.py",
     "scripts/privacy_check.py",
+    "scripts/question_taxonomy.py",
     "scripts/record_practice_attempt.py",
     "scripts/record_profile_patch.py",
     "scripts/refresh_question_clusters.py",
@@ -101,7 +108,7 @@ PACKAGE_FILES = (
     "scripts/upsert_target_interview_prep.py",
     "scripts/validate_case.py",
 )
-RESOURCE_ROOTS = {"agents", "assets", "references", "scripts"}
+RESOURCE_ROOTS = {".githooks", "agents", "assets", "references", "scripts"}
 
 
 def sha256(path: Path) -> str:
@@ -174,6 +181,9 @@ def _write_archive(staged_root: Path, archive_path: Path) -> None:
 
 
 def _validate_archive(archive_path: Path, package_manifest: dict[str, object]) -> None:
+    private_markers, marker_errors = load_private_markers()
+    if marker_errors:
+        raise ValueError("发行 ZIP 隐私检查未通过：" + "；".join(marker_errors))
     expected_names = {
         (PACKAGE_ROOT / relative).as_posix() for relative in (*PACKAGE_FILES, "MANIFEST.json")
     }
@@ -192,6 +202,9 @@ def _validate_archive(archive_path: Path, package_manifest: dict[str, object]) -
             body = archive.read((PACKAGE_ROOT / str(entry["path"])).as_posix())
             if len(body) != entry["size"] or hashlib.sha256(body).hexdigest() != entry["sha256"]:
                 raise ValueError(f"发行 ZIP 文件校验失败：{entry['path']}")
+            blockers, _ = scan_text("archive", str(entry["path"]), body, private_markers)
+            if blockers:
+                raise ValueError("发行 ZIP 隐私检查未通过：" + "；".join(blockers[:8]))
 
 
 def build(source: Path, output: Path, *, force: bool = False) -> dict[str, object]:
