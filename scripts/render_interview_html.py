@@ -1433,18 +1433,22 @@ def case_answer_save_form(case_id: str, question_id: str, practice_ref: dict[str
         versions = {}
     short = str(versions.get("short_30s") or "")
     full = str(versions.get("standard_2m") or "")
-    if not full and standards:
+    direct = practice_ref.get("reference_answer")
+    steps = direct.get("steps", []) if isinstance(direct, dict) else []
+    for step in steps if isinstance(steps, list) else []:
+        if not isinstance(step, dict):
+            continue
+        heading = str(step.get("heading") or "").strip()
+        body = str(step.get("body") or "").strip()
+        if not short and re.search(r"30\s*秒", heading):
+            short = body
+        elif not full and re.search(r"2\s*分钟", heading):
+            full = body
+    if (not short or not full) and standards:
         standard_versions = standards[0].get("versions", {})
         if isinstance(standard_versions, dict):
-            short = str(standard_versions.get("short_30s") or "")
-            full = str(standard_versions.get("standard_2m") or "")
-    if not full:
-        direct = practice_ref.get("reference_answer")
-        steps = direct.get("steps", []) if isinstance(direct, dict) else []
-        full = "\n".join(
-            f'{str(step.get("heading") or "").strip()}：{str(step.get("body") or "").strip()}'
-            for step in steps if isinstance(step, dict)
-        )
+            short = short or str(standard_versions.get("short_30s") or "")
+            full = full or str(standard_versions.get("standard_2m") or "")
     fingerprint = answer_fingerprint(curated if isinstance(curated, dict) else {})
     return (
         f'<details class="answer-confirm" data-answer-confirm data-draft-key="answer:case:{html.escape(case_id, quote=True)}:{html.escape(question_id, quote=True)}" data-answer-kind="case" '
